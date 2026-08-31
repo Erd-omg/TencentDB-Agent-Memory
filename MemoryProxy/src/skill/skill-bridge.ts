@@ -33,6 +33,13 @@ import { getProxyStorage } from "../storage/factory.js";
 import { getMetadataClient } from "../meta/client.js";
 import type { ProxyConfig } from "../types.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "../memory/bridge-telemetry.js";
+import {
+  emitRecalledEvents,
+  emitSelectedEvents,
+  emitUsedEvents,
+  skillAssetsFromResponse,
+} from "../evidence/used-evidence.js";
+import { currentChatTurn } from "../evidence/turn-tracker.js";
 import { getCoreSkillClient, type CoreSkillClient } from "./core-client.js";
 
 /**
@@ -167,6 +174,66 @@ const WRITE_SUBPATHS = new Set<string>([
   "files/remove",
 ]);
 
+/**
+ * 写操作（update/patch/files/write/...）的变更证据（P1 #6，赛题 F2 code_diff/outcome 闭环）：
+ * 从请求体提取 old→new / 写入文件 / 删除路径的真实片段作为 code_diff；outcome 记 applied + http。
+ * 读操作（get/get-by-name）无本地代码 diff 源，保持只填 tool_call（诚实边界，不编造）。
+ */
+/** 写操作的变更证据提取（P1 #6；导出供单测）。 */
+export function writeOpEvidence(
+  sub: string,
+  inboundBody: Record<string, unknown>,
+  httpStatus: number,
+): { code_diff?: string; outcome?: string } {
+  if (!WRITE_SUBPATHS.has(sub)) return {};
+  const diffParts: string[] = [];
+  if (typeof inboundBody.old_string === "string" && typeof inboundBody.new_string === "string") {
+    diffParts.push(`old→new: ${inboundBody.old_string.slice(0, 60)} → ${inboundBody.new_string.slice(0, 60)}`);
+  }
+  if (Array.isArray(inboundBody.files)) {
+    for (const f of inboundBody.files as Array<Record<string, unknown>>) {
+      if (typeof f.path === "string") {
+        diffParts.push(`write ${f.path}${typeof f.content === "string" ? ` (${f.content.length}B)` : ""}`);
+      }
+    }
+  }
+  if (Array.isArray(inboundBody.paths)) {
+    for (const p of inboundBody.paths as unknown[]) diffParts.push(`remove ${p}`);
+  }
+  if (sub === "create") diffParts.push("create skill");
+  if (sub === "delete") diffParts.push("delete skill");
+  const outcome = `applied (http ${httpStatus})`;
+  if (diffParts.length === 0) return { outcome };
+  return { code_diff: `content change: ${diffParts.join("; ")}`, outcome };
+}
+
+/**
+ * 模型实际"使用"了资产的成功端点（任务三 used 证据）：**读取内容**（get / files/read）
+ * 或**修改资产**（update / patch / files/write / files/remove）。
+ *
+ * 赛题 F2：`search` **不在**此集合中 —— search 只是召回候选（记 recalled 事件），
+ * 模型看到命中列表 ≠ 把资产内容用于决策。只有定向读取 / 修改才算"使用"。
+ */
+const SUBPATH_USES_ASSET = new Set<string>([
+  "get",
+  "get-by-name",
+  "files/read",
+  "update",
+  "patch",
+  "files/write",
+  "files/remove",
+]);
+
+/** 定向读取 → selected（选中展开内容）；其余走 used。 */
+const SUBPATH_SELECTS_ASSET = new Set<string>([
+  "get",
+  "get-by-name",
+  "files/read",
+]);
+
+/** search → 只召回候选（recalled），不宣称使用。 */
+const SUBPATH_RECALLS_ASSET = new Set<string>(["search"]);
+
 // Note: 曾经有 RESET_EXTRACT_SUBPATHS 用来在 write 成功或 extract 完成后
 // 清零 proxy 侧 buffer 计数器 (老链路 KvExtractStore)。老链路删除后计数器
 // 也没了, 该常量随之删除。
@@ -193,6 +260,12 @@ interface SessionIdFields {
   user_id: string;
   team_id: string;
   agent_id: string;
+  /**
+   * 真实会话 id（session-init 的 sessionInfo.session_id，与 injected 事件同源）。
+   * L1 路径取自 stateToIdFields；L2 binding 路径回落到原始 x-conversation-id。
+   * 用于证据链事件（injected/used/selected/recalled）的 session_id 跨阶段对齐（D5）。
+   */
+  session_id?: string;
   /**
    * URL 路径侧的 agentSource（`claude-code` / `codebuddy` ...）—— 用于
    * Repo 三段隔离键。从 SessionStore 里存储 session 的 keyId 反解出来
@@ -256,6 +329,7 @@ function stateToIdFields(
     user_id: s.user_id,
     team_id: s.team_id,
     agent_id: s.agent_id,
+    session_id: s.session_id,
     agent_source: agentSource,
     space_id: s.space_id,
     user_key: s.user_key,
@@ -275,6 +349,7 @@ function bindingToIdFields(
     user_id: binding.userId,
     team_id: binding.teamId,
     agent_id: binding.agentId,
+    session_id: sessionId,
     agent_source: agentSource,
     space_id: spaceId,
     user_key: binding.userKey,
@@ -649,6 +724,27 @@ export function createSkillBridgeHandler(
         ? Buffer.from(content, "base64")
         : Buffer.from(content, "utf-8");
 
+      // 证据打点（P1-2）：files/download 读取 skill 文件内容 = 定向读取 →
+      // selected + used（对齐 get-by-name/files/read；响应是原始字节无 skill_id，
+      // 用 inbound skill_id 补）。与主路径 :1001 同一套证据源。
+      const dlSkillId = typeof inboundBody.skill_id === "string" ? inboundBody.skill_id : undefined;
+      if (dlSkillId) {
+        const dlSource = {
+          sessionKey,
+          sessionId: ids.session_id ?? sessionKey,
+          agentId: ids.agent_id,
+          teamId: ids.team_id,
+          userId: ids.user_id,
+          bridge: "skill-bridge" as const,
+          endpoint: "files/download",
+          httpStatus: coreResp.status,
+          turnSeq: currentChatTurn(sessionKey),
+        };
+        const dlAssets = [{ assetId: dlSkillId, assetType: "skill" as const }];
+        emitSelectedEvents(dlSource, dlAssets);
+        emitUsedEvents(dlSource, dlAssets);
+      }
+
       return new Response(rawBytes, {
         status: 200,
         headers: {
@@ -947,6 +1043,42 @@ export function createSkillBridgeHandler(
     // response so we don't pin versions of skills the caller can't see.
     if (pinRepoInline && resp.status >= 200 && resp.status < 300) {
       await tryLazyPin(sub, finalRespText, ids.space_id ?? "", ids.user_id, ids.agent_source, sessionKey, pinRepoInline).catch(() => {});
+    }
+
+    // ── 证据打点（任务三，赛题 F1/F2）：成功响应后，按 sub 分派阶段事件 ──
+    // 独立于 LLM 自述：模型真的调了 bridge 且拿到了资产，才记录。
+    //   - search          → recalled（只召回候选，不宣称使用）
+    //   - get/get-by-name/files/read → selected（定向展开内容）+ used
+    //   - update/patch/files/write/files/remove → used（修改资产）
+    // 注意：sessionKey 用原始 x-conversation-id（与 injected 事件/回执对齐），
+    // 不要用带 agentSource 前缀的 emitKey（composite_key 是给 tool_call_logs 对齐用的）。
+    if (resp.status >= 200 && resp.status < 300) {
+      const inboundSkillId = typeof inboundBody.skill_id === "string"
+        ? inboundBody.skill_id
+        : undefined;
+      const parsedAssets = skillAssetsFromResponse(sub, finalRespText, inboundSkillId);
+      const baseSource = {
+        sessionKey,
+        sessionId: ids.session_id ?? sessionKey,
+        agentId: ids.agent_id,
+        teamId: ids.team_id,
+        userId: ids.user_id,
+        bridge: "skill-bridge" as const,
+        endpoint: sub,
+        query: typeof inboundBody.query === "string" ? inboundBody.query : undefined,
+        httpStatus: resp.status,
+        turnSeq: currentChatTurn(sessionKey),
+      };
+      if (SUBPATH_RECALLS_ASSET.has(sub)) {
+        emitRecalledEvents(baseSource, parsedAssets);
+      } else if (SUBPATH_SELECTS_ASSET.has(sub)) {
+        emitSelectedEvents(baseSource, parsedAssets);
+      }
+      if (SUBPATH_USES_ASSET.has(sub)) {
+        // 写操作：附 code_diff（请求里的真实 old→new / 写入文件）与 outcome（applied+http）。
+        const w = writeOpEvidence(sub, inboundBody, resp.status);
+        emitUsedEvents(w.code_diff || w.outcome ? { ...baseSource, ...w } : baseSource, parsedAssets);
+      }
     }
 
     return new Response(finalRespText, {

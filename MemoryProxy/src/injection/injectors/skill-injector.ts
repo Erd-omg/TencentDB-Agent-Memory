@@ -36,6 +36,8 @@ import {
   type ListingResult,
 } from "../../skill/core-client.js";
 import type { CoreSkillConfig } from "../../types.js";
+import { withBlockAssets } from "../evidence.js";
+import type { AssetRef } from "../../db/asset-event.js";
 
 const TAG = "[skill-injector]";
 
@@ -286,7 +288,16 @@ export class SkillInjector implements InjectionHook {
     if (!listing || listing.includes("(none)")) return [];
 
     const content = wrapAvailableSkillsBlock(listing);
-    return [{
+    // 任务三 injected 证据：把放入 prompt 的 skill 列表打进块元数据，
+    // EvidenceTracingObserver 据此逐 skill 落 `injected` 事件。
+    const assets: AssetRef[] = (result.hits ?? []).map((h) => ({
+      assetId: h.skill_id,
+      assetType: "skill",
+      version: h.version,
+      name: h.name,
+      source: "self", // listing 是 agent 自有 skill
+    }));
+    return [withBlockAssets({
       type: "text",
       content,
       metadata: {
@@ -297,6 +308,6 @@ export class SkillInjector implements InjectionHook {
         // writes replace, not fragment, the prewarmed entry.
         cacheKey: "skill-injector:catalog",
       },
-    }];
+    }, assets)];
   }
 }

@@ -1336,3 +1336,89 @@ export function toolCallTableDdl(): string {
     ttlClause,
   ].filter(Boolean).join("\n");
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Session signals — 任务四 ①：从 usage_logs + tool_call_logs 聚合会话级结果信号。
+// 归因边界：CH 是会话维度（无 assetId），信号作为「会话级语境」展示/警示，
+// 不参与逐资产有效性判定（那由 asset_event 交叉验证决定）。
+// 降级友好：CH 未启用 / 查询失败 → 返回 null，调用方静默跳过。
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 会话级结果信号（①）。 */
+export interface SessionSignals {
+  /** 会话 turn 数（usage_logs distinct turn_seq）。 */
+  turnCount: number;
+  /** bridge 工具调用总次数（tool_call_logs kind='bridge_call'）。 */
+  toolCallCount: number;
+  /** bridge 失败次数（upstream_status >= 400）。 */
+  bridgeFailCount: number;
+  /** 失败率 0..1。 */
+  bridgeFailRate: number;
+  /** bridge 平均耗时 ms。 */
+  avgLatencyMs: number;
+  /** 总 token（usage_logs）。 */
+  totalTokens: number;
+  /** 总 credit（usage_logs）。 */
+  credit: number;
+}
+
+/** session key 匹配：兼容原始（usage_logs）与带前缀 composite（tool_call_logs）。 */
+function sessionKeyClause(): string {
+  // tool_call_logs 存 composite（`codebuddy:sess-xxx`），usage_logs 存原始。
+  // 用 `OR session_key LIKE '%:' || {s}` 兜底带前缀形态（避免手拼 agentSource）。
+  return `session_key = {s:String} OR session_key LIKE '%:' || {s:String}`;
+}
+
+/**
+ * 查询会话级结果信号。CH 未启用 / 不可用 / 查询失败 → null（静默降级）。
+ * 供回执「会话信号」行 + 失败率警示使用（evidence/session-signals.ts）。
+ */
+export async function querySessionSignals(sessionKey: string): Promise<SessionSignals | null> {
+  if (disabled || !client || !config) return null;
+  try {
+    // usage_logs：turn 数 + token + credit
+    const usageRes = await client.query({
+      query:
+        `SELECT count(DISTINCT turn_seq) AS turns, sum(total_tokens) AS total, sum(credit) AS credit `
+        + `FROM ${config.database}.${config.table} `
+        + `WHERE ${sessionKeyClause()}`,
+      query_params: { s: sessionKey },
+      format: "JSONEachRow",
+    });
+    const usageRows = await usageRes.json<Record<string, string>>();
+
+    // tool_call_logs：bridge 调用数 + 失败率 + 平均耗时
+    const callRes = await client.query({
+      query:
+        `SELECT count() AS n, countIf(upstream_status >= 400) AS fails, avg(elapsed_ms) AS avgMs `
+        + `FROM ${config.database}.${TOOL_CALL_TABLE} `
+        + `WHERE kind = 'bridge_call' AND (${sessionKeyClause()})`,
+      query_params: { s: sessionKey },
+      format: "JSONEachRow",
+    });
+    const callRows = await callRes.json<Record<string, string>>();
+
+    const usageRow: Record<string, string> | undefined = usageRows[0];
+    const callRow: Record<string, string> | undefined = callRows[0];
+    const n = Number(callRow?.n ?? 0);
+    const fails = Number(callRow?.fails ?? 0);
+    const num = (v: unknown, d = 0): number => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : d;
+    };
+    return {
+      turnCount: num(usageRow?.turns),
+      toolCallCount: n,
+      bridgeFailCount: fails,
+      bridgeFailRate: n > 0 ? fails / n : 0,
+      avgLatencyMs: num(callRow?.avgMs),
+      totalTokens: num(usageRow?.total),
+      credit: num(usageRow?.credit),
+    };
+  } catch (err) {
+    if (process.env.PROXY_DEBUG_ASSET_EVENT) {
+      console.warn(`[session-signals] query failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return null;
+  }
+}

@@ -308,6 +308,44 @@ export class CoreSkillClient {
   }
 
   /**
+   * `POST /v3/skill/get` — 按 skill_id 取 skill 详情（team-scoped，数据面）。
+   *
+   * `include_content: true` 时返回 `data.content`（SKILL.md 全文）。用于
+   * 任务三验证器（mem:validate）加载资产正文。代理侧调用方传 user_id 走
+   * read 路径时 core 会按 team 语义剥离 user_id（与 skill-bridge 一致）。
+   */
+  async getSkill(
+    input: {
+      team_id: string;
+      agent_id: string;
+      skill_id: string;
+      user_id?: string;
+      version?: number;
+      include_content?: boolean;
+    },
+    opts: CoreSkillRequestOptions = {},
+  ): Promise<{
+    skill_id: string;
+    name?: string;
+    version?: number;
+    content?: string;
+    description?: string;
+    content_hash?: string;
+  }> {
+    return this.post<{
+      skill_id: string;
+      name?: string;
+      version?: number;
+      content?: string;
+      description?: string;
+      content_hash?: string;
+    }>("/v3/skill/get", {
+      ...input,
+      include_content: input.include_content ?? true,
+    }, opts);
+  }
+
+  /**
    * Call /v3/skill/listing to get the agent's owned skills.
    * Without a query, the plugin routes to list-head (full listing when ≤ topK,
    * search when > topK). The response includes a pre-rendered `<available_skills>`

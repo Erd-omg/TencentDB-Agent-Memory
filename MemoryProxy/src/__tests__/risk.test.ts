@@ -1,0 +1,117 @@
+/**
+ * risk 风险维度测试 —— 低置信 / 可能过期 / 多来源。
+ */
+
+import { describe, it, expect } from "vitest";
+import type { AssetEvent, AssetStageSummary } from "../db/asset-event.js";
+import { evaluateRisks } from "../evidence/risk.js";
+
+function summary(stages: AssetStageSummary["stages"] = []): AssetStageSummary {
+  return {
+    asset: { assetId: "skl-1", assetType: "skill", name: "demo" },
+    stages,
+    lastStageAt: {} as AssetStageSummary["lastStageAt"],
+  };
+}
+
+function evt(stage: AssetEvent["stage"], over: Partial<AssetEvent> = {}): AssetEvent {
+  return {
+    id: `evt-${Math.random().toString(36).slice(2)}`,
+    stage,
+    asset: { assetId: "skl-1", assetType: "skill", name: "demo" },
+    sessionKey: "codebuddy:conv-x",
+    createdAt: 1_700_000_000_000,
+    ...over,
+  };
+}
+
+describe("evaluateRisks", () => {
+  it("recalled score 低于阈值 → 低置信风险", () => {
+    const risks = evaluateRisks(summary(["recalled"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.3 } }),
+    ]);
+    expect(risks.map((r) => r.label)).toContain("低置信");
+    expect(risks.find((r) => r.label === "低置信")?.level).toBe("medium");
+  });
+
+  it("score 高于阈值 → 无低置信风险", () => {
+    const risks = evaluateRisks(summary(["recalled"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.82 } }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("低置信");
+  });
+
+  it("被纠正后仍被使用 → 可能过期（high）", () => {
+    const risks = evaluateRisks(summary(["used", "corrected", "used"]), [
+      evt("corrected", { createdAt: 200 }),
+      evt("used", { createdAt: 300 }),
+    ]);
+    const stale = risks.find((r) => r.label === "可能过期");
+    expect(stale).toBeDefined();
+    expect(stale?.level).toBe("high");
+  });
+
+  it("纠正后无再使用 → 无过期风险", () => {
+    const risks = evaluateRisks(summary(["used", "corrected"]), [
+      evt("used", { createdAt: 100 }),
+      evt("corrected", { createdAt: 200 }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("可能过期");
+  });
+
+  it("多来源 → 多来源风险（low）", () => {
+    const risks = evaluateRisks(summary(["recalled"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", source: "self" } }),
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", source: "team" } }),
+    ]);
+    const multi = risks.find((r) => r.label === "多来源");
+    expect(multi).toBeDefined();
+    expect(multi?.level).toBe("low");
+  });
+
+  it("无风险 → 空数组", () => {
+    const risks = evaluateRisks(summary(["used", "validated"]), [
+      evt("used", { asset: { assetId: "skl-1", assetType: "skill", source: "self", score: 0.9 } }),
+      evt("validated", { createdAt: 200 }),
+    ]);
+    expect(risks).toEqual([]);
+  });
+
+  it("已使用（used）的资产即使召回分低也不再标低置信（避免误报）", () => {
+    const risks = evaluateRisks(summary(["recalled", "used"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.0 } }),
+      evt("used", { createdAt: 200 }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("低置信");
+  });
+
+  it("已验证（validated）的资产即使召回分低也不再标低置信（避免误报）", () => {
+    const risks = evaluateRisks(summary(["recalled", "validated"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.0 } }),
+      evt("validated", { createdAt: 200 }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("低置信");
+  });
+
+  it("可能过期：对最新纠正时间比较——首次纠正后、末次纠正前使用不标过期", () => {
+    // 两次纠正（t=200 / t=400），used 在 t=300（首次纠正后、末次纠正前）→ 不标过期。
+    const risks = evaluateRisks(summary(["used", "corrected"]), [
+      evt("corrected", { createdAt: 200 }),
+      evt("used", { createdAt: 300 }),
+      evt("corrected", { createdAt: 400 }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("可能过期");
+  });
+
+  it("可能过期：末次纠正之后仍被使用 → 标过期（high）", () => {
+    const risks = evaluateRisks(summary(["used", "corrected", "used"]), [
+      evt("corrected", { createdAt: 200 }),
+      evt("used", { createdAt: 300 }),
+      evt("corrected", { createdAt: 400 }),
+      evt("used", { createdAt: 500 }),
+    ]);
+    const stale = risks.find((r) => r.label === "可能过期");
+    expect(stale).toBeDefined();
+    expect(stale?.level).toBe("high");
+  });
+});

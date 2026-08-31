@@ -132,6 +132,7 @@ import { getSessionStore } from "../session/store.js";
 import type { HookRegistry, PrewarmInput } from "./types.js";
 import { prewarmAll, type PrewarmOptions, type PrewarmResult } from "./prewarm.js";
 import { LoggingInjectionObserver, NoopInjectionObserver, LangfuseInjectionObserver } from "./observer.js";
+import { EvidenceTracingObserver } from "./evidence-observer.js";
 
 // ... (rest)
 
@@ -401,11 +402,17 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
 
   // Observer: prefer Langfuse (injection spans under LLM trace) when enabled;
   // fall back to structured logging when log level ≤ info; else noop.
-  const observer = config.langfuse?.enabled
+  const baseObserver = config.langfuse?.enabled
     ? new LangfuseInjectionObserver()
     : (config.log?.level === "debug" || config.log?.level === "info")
       ? new LoggingInjectionObserver()
       : new NoopInjectionObserver();
+
+  // 任务三 injected 证据：包装 base observer，从块 assets 标记落 asset_event。
+  // 缺省开启；成本极低且静默降级（DB 不可用/无可归因会话时自动跳过）。
+  const observer = (config.injection?.assetEvidence?.enabled ?? true)
+    ? new EvidenceTracingObserver(baseObserver)
+    : baseObserver;
 
   const pipeline = new InjectionPipeline(registry, adapters, {
     hookCacheRepo,

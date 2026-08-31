@@ -43,6 +43,12 @@ const MEM_COMMANDS_ARGS: Record<string, boolean> = {
   "create-task": true,
   "update-task": true,
   "session-reset": false,
+  // correct 需要 <assetId> [原因]，接受可选 args。
+  "correct": true,
+  // receipt 支持 --full / --json / <assetId>，接受可选 args。
+  "receipt": true,
+  // validate 支持 --all / <assetId>，接受可选 args。
+  "validate": true,
 };
 
 /**

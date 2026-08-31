@@ -11,6 +11,7 @@ import { createSkillBridgeHandler } from "./skill/skill-bridge.js";
 import { createMemoryBridgeHandler } from "./memory/memory-bridge.js";
 import { createInstanceDestroyHandler } from "./routes/instance-destroy.js";
 import { createRateLimitHandlers } from "./routes/rate-limits.js";
+import { createEvidenceHandlers } from "./routes/evidence.js";
 import { hasAnalyseMarker, hasCostGuardMarker } from "./routes/whitelist.js";
 import { tryActivateStorage, tryActivateRedis } from "./injection/index.js";
 import { getEffectiveBackend } from "./storage/factory.js";
@@ -153,6 +154,20 @@ export function createApp(config: ProxyConfig): Hono {
     return import("./routes/session-force-archive.js").then(({ createSessionForceArchiveHandler }) =>
       createSessionForceArchiveHandler(config)(c),
     );
+  });
+
+  // ── Evidence read-only API（任务四 回执可视化：mem:receipt 同源聚合 + Panel 集成）──
+  // 只读 GET；鉴权 admin.apiKey（空则公开）；CORS 头供浏览器/Panel 直连。
+  const evidenceHandlers = createEvidenceHandlers(config);
+  app.get("/v3/evidence/sessions", (c) => evidenceHandlers.sessions(c));
+  app.get("/v3/evidence/receipt", (c) => evidenceHandlers.receipt(c));
+  app.get("/v3/evidence/events", (c) => evidenceHandlers.events(c));
+  app.options("/v3/evidence/*", (c) => {
+    return c.body(null, 204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Authorization, X-Tdai-Service-Id, X-Tdai-User-Key, Content-Type",
+    });
   });
 
   // ── Whitelisted primary endpoints ────────────────────────────────────────

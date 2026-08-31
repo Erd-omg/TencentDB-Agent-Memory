@@ -1,0 +1,154 @@
+/* EvidencePage — 资产使用回执可视化页
+ * 对齐 _asset-* 设计系统：仅用 tea 令牌色（无硬编码 hex）。 */
+
+._memory-evidence-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── 详情区（右侧） ─────────────────────────────────────────────── */
+._evidence-detail-pane {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 2px 2px 16px;
+}
+
+/* ── 有效性汇总条 ───────────────────────────────────────────────── */
+._evidence-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--tea-color-border-primary-default);
+  border-radius: 6px;
+  background: var(--tea-color-bg-primary-default);
+  box-shadow: var(--tea-shadow-xs);
+}
+
+/* ── 证据链完整性提醒（F4） ─────────────────────────────────────── */
+._evidence-chain-alert {
+  margin-bottom: 0;
+}
+._evidence-chain-title {
+  display: block;
+  margin-bottom: 6px;
+}
+._evidence-chain-row {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--tea-color-text-secondary);
+}
+
+/* ── 类型分组 ───────────────────────────────────────────────────── */
+._evidence-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+._evidence-group-title {
+  font-size: 14px;
+  margin: 4px 0 0;
+}
+
+/* ── 资产卡 ─────────────────────────────────────────────────────── */
+._evidence-card {
+  --card-body-padding: 16px;
+}
+._evidence-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+._evidence-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+._evidence-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tea-color-text-primary);
+}
+._evidence-card-stages {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--tea-color-text-secondary);
+}
+._evidence-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--tea-color-bg-secondary-default);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+._evidence-stage-arrow {
+  margin: 0 4px;
+  color: var(--tea-color-text-tertiary);
+}
+._evidence-card-risks {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+._evidence-label {
+  color: var(--tea-color-text-tertiary);
+  font-size: 12px;
+  margin-right: 2px;
+}
+._evidence-details {
+  margin-top: 8px;
+  border-top: 1px dashed var(--tea-color-border-primary-default);
+  padding-top: 8px;
+}
+._evidence-details-summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tea-color-text-brand-default);
+  user-select: none;
+}
+._evidence-details-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+._evidence-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tea-color-text-secondary);
+  font-family: var(--font-mono);
+}
+._evidence-row-stage {
+  color: var(--tea-color-text-brand-default);
+  flex-shrink: 0;
+}
+._evidence-row-time {
+  color: var(--tea-color-text-tertiary);
+  flex-shrink: 0;
+}
+._evidence-row-turn {
+  color: var(--tea-color-text-warning-default);
+  flex-shrink: 0;
+}
+._evidence-row-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

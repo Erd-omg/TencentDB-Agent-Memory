@@ -1,0 +1,25 @@
+{
+  "verified_at": "2026-08-24T12:37:50.168Z",
+  "session": "sess-skill-1787575017307",
+  "team": "team-coudtbobez",
+  "agent": "agt-coudeqdh9q",
+  "expert_agent": "agt-jyeano3vah",
+  "pools": {
+    "A": "meta list-accessible(team)",
+    "B": "kernel skill/list(own)",
+    "C": "available_skills(injected)"
+  },
+  "whitelist_expected": "A=5 B=4 C=4 merged=1",
+  "available_skills": [
+    "memory-hub-asset-guide",
+    "cloud-migration-postmortems",
+    "team-coding-standards",
+    "cloud-migration-tool-guide"
+  ],
+  "bridge_search_items": [
+    {
+      "name": "migration-expert-tips",
+      "desc": "云主机迁移专家经验：批量迁移规划、停机窗口评估、迁移风险清单与验收标准。规划迁移方案前先检索本 skill。"
+    }
+  ]
+}

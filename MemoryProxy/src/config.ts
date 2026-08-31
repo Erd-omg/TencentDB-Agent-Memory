@@ -395,6 +395,13 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
           ? yaml.injection.assetReflection.markerOptIn
           : DEFAULT_CONFIG.injection.assetReflection!.markerOptIn,
       },
+      // 任务三 injected 证据打点开关：yaml 缺省或类型错走 default（开）。
+      // 之前只类型化了没解析 → 永远开、不可关；这里补上让开关真正生效。
+      assetEvidence: {
+        enabled: typeof yaml.injection?.assetEvidence?.enabled === "boolean"
+          ? yaml.injection.assetEvidence.enabled
+          : DEFAULT_CONFIG.injection.assetEvidence?.enabled ?? true,
+      },
     },
     extraction: {
       enabled: yaml.extraction?.enabled ?? DEFAULT_CONFIG.extraction.enabled,
@@ -525,12 +532,37 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
           }
         : {}),
     },
+    // 任务三 validated/corrected 验证器（mem:validate）。可选段 —— 未配置时
+    // 字段缺席，mem:validate 返回"验证未启用/无规则"（不假装验证过）。
+    ...(yaml.validation
+      ? {
+          validation: {
+            enabled: Boolean(yaml.validation.enabled),
+            timeoutMs:
+              typeof yaml.validation.timeoutMs === "number"
+                ? yaml.validation.timeoutMs
+                : 30000,
+            rules:
+              yaml.validation.rules && typeof yaml.validation.rules === "object"
+                ? (Object.fromEntries(
+                    Object.entries(yaml.validation.rules as Record<string, unknown>)
+                      .filter(([, v]) => typeof v === "string"),
+                  ) as Record<string, string>)
+                : {},
+            // 任务四 ② 任务收尾自动验证：缺省随 enabled 开启（undefined = 跟随默认）。
+            // yaml 类型推断不含该新键，用 cast 读取（同 ccRequestRouting 姿势）。
+            autoValidateOnCompletion:
+              typeof (yaml.validation as { autoValidateOnCompletion?: unknown }).autoValidateOnCompletion === "boolean"
+                ? (yaml.validation as { autoValidateOnCompletion: boolean }).autoValidateOnCompletion
+                : undefined,
+          },
+        }
+      : {}),
     ccRequestRouting: {
       enabled:
         (yaml as { ccRequestRouting?: { enabled?: boolean } }).ccRequestRouting?.enabled
         ?? DEFAULT_CONFIG.ccRequestRouting.enabled,
-    },
-    workbuddyRequestRouting: {
+    },    workbuddyRequestRouting: {
       enabled:
         (yaml as { workbuddyRequestRouting?: { enabled?: boolean } }).workbuddyRequestRouting?.enabled
         ?? DEFAULT_CONFIG.workbuddyRequestRouting.enabled,

@@ -17,6 +17,9 @@ import { executeCreateSkill } from "./commands/create-skill.js";
 import { executeCreateTask } from "./commands/create-task.js";
 import { executeUpdateTask } from "./commands/update-task.js";
 import { executeSessionReset } from "./commands/session-reset.js";
+import { executeValidate } from "./commands/validate.js";
+import { executeReceipt } from "./commands/receipt.js";
+import { executeCorrect } from "./commands/correct.js";
 
 export { parseMemCommand, parseCommandFromText, type ParsedMemCommand } from "./parser.js";
 export { buildMemResponse } from "./response-builder.js";
@@ -31,6 +34,9 @@ const KNOWN_COMMANDS = new Set([
   "create-task",
   "update-task",
   "session-reset",
+  "validate",
+  "receipt",
+  "correct",
   "help",
 ]);
 
@@ -76,6 +82,12 @@ export async function executeMemCommand(
       return executeCreateTask(ctx);
     case "update-task":
       return executeUpdateTask(ctx);
+    case "validate":
+      return executeValidate(ctx);
+    case "receipt":
+      return executeReceipt(ctx);
+    case "correct":
+      return executeCorrect(ctx);
     case "session-reset":
       return executeSessionReset(ctx);
     default: {

@@ -1,0 +1,176 @@
+────────────────────────────────────────────────────────────────
+任务三 F1–F4 端到端实测 · 会话 sess-task3-1788122041366
+proxy=http://localhost:8097/codebuddy/default/v1/chat/completions
+────────────────────────────────────────────────────────────────
+[1] 命中会话初始化表单：会话初始化 — 是否关联团队资产
+[2] 回答「是，关联团队资产」→ 表单：会话初始化 — 选择 Agent 与任务
+[3] 选 agent「default-agent-admin (udeqdh9q)」/ task「本次不关联任务」→ finish=stop
+[4] 真实对话 → finish=stop 自动回执=未触发
+
+[5] F1：bridge 调用（分派阶段事件）
+      skill/search        → status=200 命中=6
+      ✓ search 命中 cloud-migration-tool-guide（skl-6Xgq7P22VjxO）
+      skill/get-by-name   → status=200
+      memory/atomic/search→ status=200 命中=5
+
+[5b] F1/F2 断言（直查 asset_event 表）
+      ✓ search 命中落 recalled（11 条）
+      ✓ search 命中不宣称 used（search 相关 used=0，F2）
+      ✓ get-by-name 落 selected（1 条）
+      ✓ get-by-name 落 used（1 条，F1 定向读取=使用）
+      ✓ used 事件 evidence 带 tool_call（bridge/endpoint，F2）
+      ✓ memory/atomic/search 落 recalled（5 条，非 used）
+
+[5c] D1：memory 定向读取证据（Chat-Memory 首次能到 used）
+      memory/atomic/query   → status=200 命中=0
+      memory/scenario/read  → status=200 code=0
+      (atomic/query 无 items，跳过 selected 硬断言 —— 容错解析不造伪证据)
+      ✓ scenario/read 命中 → 落 used（1 条，D1 定向读取=使用）
+
+[6] mem:receipt（recalled/selected/used 阶段）
+
+## 📋 资产使用回执（本会话）
+
+**应用资产：13 项**（Skill 6 · Profile 1 · Chat-Memory 6）
+**证据链计数：** 召回 11 · 选中 2 · 注入 12 · 使用 2
+**有效性：** ✅已验证 0 · 🔄复用 0 · ⏳待验证 2 · 💤参考 11
+会话信号：1 轮 · bridge 调用 5 次 · 均耗 2ms · token 5579
+
+## Skill（6）
+### cloud-migration-tool-guide v2 · 来源 self
+- 阶段：召回 → 选中 → 注入 → 使用
+- 有效性：⏳ 已采用待验证
+- 风险：`[low] 多来源（来自 self / team）`
+- 决策证据：工具调用 skill-bridge/get-by-name
+- 最新证据：skill-bridge/get-by-name
+> 💤 仅背景参考（5 项）· `mem:receipt --full` 展开
+
+## Profile（1）
+> 💤 仅背景参考（1 项）· `mem:receipt --full` 展开
+
+## Chat-Memory（6）
+### 云主机迁移-一键迁移工具.md
+- 阶段：选中 → 使用
+- 有效性：⏳ 已采用待验证
+- 决策证据：工具调用 memory-bridge/scenario/read
+- 最新证据：memory-bridge/scenario/read
+> 💤 仅背景参考（5 项）· `mem:receipt --full` 展开
+
+> （数据来自 asset_event 事件表，非模型自述，可回溯）
+> （注：资产→代码变更→结果 的 diff/outcome 信号暂不可得，决策以工具调用为据）
+
+[7] F3：mem:correct skl-4AbLsXJqNM6E（用户主动纠正）
+
+✅ 已记录用户纠正（corrected）
+  资产：cloud-migration-batch-planning（skill v2）
+  原因：引用的旧版 CLI 命令已下线，需要更新
+  证据来源：user（用户/评审主动反馈）
+
+      ✓ 落 1 条 corrected 事件
+      ✓ corrected evidence.source="user"
+      mem:correct skl-nonexistent → 被拦截：❌ 本会话未找到资产 skl-nonexistent，无法纠正（没有可回溯的证据链）
+      ✓ 不存在资产被前置校验拦截（F3 防凭空纠正）
+
+[8] mem:validate（真实校验命令 → validated/corrected）
+
+🔬 资产验证（6 项）
+  ✅ 通过 skl-4AbLsXJqNM6E（skill v2） [0] PASS skl-4AbLsXJqNM6E.md: frontmatter + 36 lines of body
+  ✅ 通过 skl-8yYETDkrSndn（skill v7） [0] PASS skl-8yYETDkrSndn.md: frontmatter + 31 lines of body
+  ✅ 通过 skl-6Xgq7P22VjxO（skill v2） [0] PASS skl-6Xgq7P22VjxO.md: frontmatter + 28 lines of body
+  ✅ 通过 skl-qCbKMAmmkTJe（skill v1） [0] PASS skl-qCbKMAmmkTJe.md: frontmatter + 20 lines of body
+  ✅ 通过 skl-GZCFYleA1eKg（skill v1） [0] PASS skl-GZCFYleA1eKg.md: frontmatter + 22 lines of body
+  ✅ 通过 skl-G0TjSpjWyJFE（skill v1） [0] PASS skl-G0TjSpjWyJFE.md: frontmatter + 24 lines of body
+—— 6/6 通过，已写入 validated/corrected 事件
+
+[9] mem:receipt（最终：F4 证据链完整性校验）
+
+## 📋 资产使用回执（本会话）
+
+**应用资产：13 项**（Skill 6 · Profile 1 · Chat-Memory 6）
+**证据链计数：** 召回 11 · 选中 2 · 注入 12 · 使用 2 · 已验证 6 · 已纠正 1
+**有效性：** ✅已验证 1 · 🔄复用 0 · ⏳待验证 1 · ⚠️已标记验证(缺使用) 4 · 💤参考 6 · ❌需修正 1
+会话信号：2 轮 · bridge 调用 5 次 · 均耗 2ms · token 11167
+
+## Skill（6）
+### cloud-migration-batch-planning v2 · 来源 self
+- 阶段：召回 → 注入 → 已验证 → 已纠正
+- 有效性：❌ 需修正
+- 风险：`[low] 多来源（来自 self / team）`
+- 最新证据：[command] exit=0 PASS skl-4AbLsXJqNM6E.md: frontmatter + 36 lines of body
+### cloud-migration-tool-guide v2 · 来源 self
+- 阶段：召回 → 选中 → 注入 → 使用 → 已验证
+- 有效性：✅ 已通过测试验证
+- 风险：`[low] 多来源（来自 self / team）`
+- 决策证据：工具调用 skill-bridge/get-by-name
+- 最新证据：[command] exit=0 PASS skl-6Xgq7P22VjxO.md: frontmatter + 28 lines of body
+### memory-hub-asset-guide v7 · 来源 self
+- 阶段：召回 → 注入 → 已验证
+- 有效性：⚠️ 已标记验证（缺使用证据）
+- 风险：`[low] 多来源（来自 self / team）`
+- 最新证据：[command] exit=0 PASS skl-8yYETDkrSndn.md: frontmatter + 31 lines of body
+### cloud-migration-postmortems v1 · 来源 self
+- 阶段：召回 → 注入 → 已验证
+- 有效性：⚠️ 已标记验证（缺使用证据）
+- 风险：`[low] 多来源（来自 self / team）`
+- 最新证据：[command] exit=0 PASS skl-qCbKMAmmkTJe.md: frontmatter + 20 lines of body
+### team-coding-standards v1 · 来源 self
+- 阶段：召回 → 注入 → 已验证
+- 有效性：⚠️ 已标记验证（缺使用证据）
+- 风险：`[low] 多来源（来自 self / team）`
+- 最新证据：[command] exit=0 PASS skl-GZCFYleA1eKg.md: frontmatter + 22 lines of body
+### migration-expert-tips v1 · 来源 team
+- 阶段：召回 → 已验证
+- 有效性：⚠️ 已标记验证（缺使用证据）
+- 最新证据：[command] exit=0 PASS skl-G0TjSpjWyJFE.md: frontmatter + 24 lines of body
+
+## Profile（1）
+> 💤 仅背景参考（1 项）· `mem:receipt --full` 展开
+
+## Chat-Memory（6）
+### 云主机迁移-一键迁移工具.md
+- 阶段：选中 → 使用
+- 有效性：⏳ 已采用待验证
+- 决策证据：工具调用 memory-bridge/scenario/read
+- 最新证据：memory-bridge/scenario/read
+> 💤 仅背景参考（5 项）· `mem:receipt --full` 展开
+
+⚠️ **证据链完整性提醒：**
+- 🔴 [error] 资产 skl-4AbLsXJqNM6E 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。 请确认该资产确实被模型使用后再断言 validated，或用 mem:correct 纠正。
+- 🔴 [error] 资产 skl-8yYETDkrSndn 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。 请确认该资产确实被模型使用后再断言 validated，或用 mem:correct 纠正。
+- 🔴 [error] 资产 skl-qCbKMAmmkTJe 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。 请确认该资产确实被模型使用后再断言 validated，或用 mem:correct 纠正。
+- 🔴 [error] 资产 skl-GZCFYleA1eKg 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。 请确认该资产确实被模型使用后再断言 validated，或用 mem:correct 纠正。
+- 🔴 [error] 资产 skl-G0TjSpjWyJFE 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。 请确认该资产确实被模型使用后再断言 validated，或用 mem:correct 纠正。
+
+> （数据来自 asset_event 事件表，非模型自述，可回溯）
+> （注：资产→代码变更→结果 的 diff/outcome 信号暂不可得，决策以工具调用为据）
+
+[10] F4 断言（回执内容）
+      ✓ 回执含 ⚠️ 证据链完整性提醒 段
+      ✓ validated-无-used 资产状态降级为 ⚠️ 已标记验证（缺使用证据）
+      ✓ cloud-migration-tool-guide 走完 召回→选中→注入→使用→已验证
+      ✓ 被纠正资产状态显示 ❌ 需修正
+
+[11] A/D/C 断言（回执内容）
+      ✓ 回执含有效性汇总行（**有效性：** ✅已验证 N · …）
+      ✓ cloud-migration-tool-guide 有效性=✅ 已通过测试验证（行为×结果交叉）
+      ✓ 回执展示决策证据（工具调用，C 诚实边界）
+
+[13] 任务四 深化：Markdown 折叠回执 / --json / 深潜
+      ✓ 回执为 Markdown 分组（## 标题 + 类型分组）
+      ✓ reference_only 资产默认折叠（> 💤 仅背景参考（N 项）· mem:receipt --full 展开）
+      ✓ mem:receipt --json 输出结构化回执（asset_count=13）
+      ✓ --json 每资产含 events 数组（证据展开数据）
+      ✓ mem:receipt <assetId> 深潜列出该资产全部证据事件
+
+[12] B：任务收尾自动追加简短回执（连续无工具轮）
+      第 1 轮 → finish=stop 工具=无 我来确认一下这些 `mem:` 指令的本意——它们看起来像记忆系统操作指令，我先查一下团队关于记忆/资产使用的约定。 <
+      ✓ 任务收尾自动追加简短回执（B，threshold=2；[4] 或后续连续无工具轮触发）
+
+📋 资产使用回执（自动）
+本次应用资产 13 项 · 有效性：已验证 1 / 复用 0 / 待验证 1 / ⚠️验证缺使用 4 / 参考 6 / 需修正 1
+关键采用：cloud-migration-tool-guide、云主机迁移-一键迁移工具.md
+（输入 `mem:receipt` 查看完整回执）
+
+────────────────────────────────────────────────────────────────
+实测完成：sess-task3-1788122041366（agent=default-agent-admin (udeqdh9q)）exit=0
+EXIT=0

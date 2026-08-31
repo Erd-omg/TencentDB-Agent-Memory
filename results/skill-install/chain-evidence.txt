@@ -1,0 +1,60 @@
+──────────────────────────────────────────────────────────────────────
+Skill 检索链路验证 · 会话 sess-skill-1787575017307 · proxy=http://localhost:8097
+──────────────────────────────────────────────────────────────────────
+[1] asset_confirm 表单 ✓ 会话初始化 — 是否关联团队资产
+[2] 选择表单 ✓ agent=default-agent-admin (udeqdh9q) / task=云主机迁移平台 v1 (vxoq8e1r)
+[3] 会话注册 → finish=undefined content: 收到。我先翻一下之前的对话记录确认"关联团队资产"的上下文，然后去团队 skill 库里检索「迁移专家」相关的批量迁移/验收最佳实践。
+
+让我先读取场景记录和检索：
+
+```bash
+# 1. 读取 L2 场景全文，确认 v1 关联团队资产
+
+[4] 注入证据 <available_skills>（agent=agt-coudeqdh9q）含 4 个 skill:
+     · memory-hub-asset-guide
+     · cloud-migration-postmortems
+     · team-coding-standards
+     · cloud-migration-tool-guide
+
+[5] skill-bridge 团队检索「迁移 批量 验收」→ 1 条:
+     · migration-expert-tips — 云主机迁移专家经验：批量迁移规划、停机窗口评估、迁移风险清单与验收标准。规划迁移方案前先检索本 skill。
+     ↳ 跨 agent 命中（不在本 agent available_skills）：migration-expert-tips
+
+[6] 任务提示（触发模型检索团队 skill 并复用）：
+     finish=undefined | content: 我先按你的要求检索团队里「迁移专家」沉淀的批量迁移/验收最佳实践 skill，并同时加载 cloud-migration-tool-guide。
+
+**第一步：skill_search 检索**
+
+```bash
+curl -sSk -X 
+     → [skill_search] query=批量迁移 验收 最佳实践 迁移专家（模型发出的 curl）
+       · migration-expert-tips — 云主机迁移专家经验：批量迁移规划、停机窗口评估、迁移风险清单与验收标准。规划迁移方案前先检索本 sk
+     ⇠ 执行 skill_search 并回喂模型
+     → [skill_view] migration-expert-tips（跨 agent 命中，harness 代为执行）
+       ⚠ bridge get-by-name=40401（v2.0.x owner 隔离）→ 用 search 命中元数据+snippet 兜底
+     ⇠ 执行 skill_view 并回喂模型
+     round1 → finish=undefined | content: 我先打开自己的 `cloud-migration-tool-guide` 全文，同时尝试读取 `migration-expert-tips` 的 SKILL.md 内容。
+
+```bash
+# 1. 打开自带 skill：cloud-mig
+     → [skill_view] cloud-migration-tool-guide（模型发出的 curl）
+     ⇠ 执行 skill_view 并回喂模型
+     round2 → finish=undefined | content: 我先补齐两个 skill 的内容：拉取 `cloud-migration-tool-guide` 的完整 SKILL.md 与 manifest，并尝试读取 `migration-expert-tips` 的正文（我知道刚才 skill_v
+     → [skill_view] cloud-migration-tool-guide（模型发出的 curl）
+     ⇠ 执行 skill_view 并回喂模型
+     round3 → finish=undefined | content: 我先补读一下团队 L2 场景文件的完整上下文，确保批量迁移方案与既有项目演进（ACL/VSS、自检清单等）对齐，再基于两个 skill 输出。
+
+<l2_scene_read>
+path: 云主机迁移-一键迁移工具.md
+</l2_scen
+
+[7] 模型最终答复：我先补读一下团队 L2 场景文件的完整上下文，确保批量迁移方案与既有项目演进（ACL/VSS、自检清单等）对齐，再基于两个 skill 输出。 <l2_scene_read> path: 云主机迁移-一键迁移工具.md </l2_scene_read>
+     ↳ 模型依据/打开的 skill：migration-expert-tips, cloud-migration-tool-guide
+
+[8] proxy 日志证据：
+     [hook-cache] session=sess-skill-1787575017307 hook=tdai-memory-tools-injector hit blocks=1
+     [hook-cache] session=sess-skill-1787575017307 hook=tdai-profile-memory-injector hit blocks=1
+     [skill-conversation-add] appended session=sess-skill-1787575017307 round_msgs=11 slice=0/12 took=6ms
+     [skill-bridge] team search whitelist A=5 B=4 C=4 merged=1 user=usr-coud7corvg team=team-coudtbobez
+     [skill-bridge] team search whitelist A=5 B=4 C=4 merged=1 user=usr-coud7corvg team=team-coudtbobez
+     [skill-bridge] team search whitelist A=5 B=4 C=4 merged=1 user=usr-coud7corvg team=team-coudtbobez

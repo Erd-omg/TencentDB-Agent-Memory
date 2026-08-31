@@ -1,0 +1,6 @@
+corrected|1
+injected|66
+recalled|17
+selected|4
+used|4
+validated|6

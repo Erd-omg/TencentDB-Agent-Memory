@@ -30,8 +30,19 @@ export interface PanelConfig {
     sync: boolean;
     proxyBaseUrl: string;
   };
-  /** 默认 Agent 模板文件的本地存储目录根（存 Panel 本地，按 {dir}/{instanceId}/{team_id}/template.json）。 */
+  /**
+   * 默认 Agent 模板文件的本地存储目录根（存 Panel 本地，按 {dir}/{instanceId}/{team_id}/template.json）。
+   */
   agentTemplateDir: string;
+  /**
+   * 资产证据链回执（任务四）只读代理：Panel /api/v1/evidence/* → proxy /v3/evidence/*。
+   * proxyBaseUrl 缺省 127.0.0.1:8096（本地开源部署）；按实例 proxy_endpoint 优先覆盖。
+   * adminKey 对应 proxy config.admin.apiKey（proxy 侧空则开放只读，无需带）。
+   */
+  evidence: {
+    proxyBaseUrl: string;
+    adminKey: string;
+  };
 }
 
 function envBool(key: string, fallback: boolean): boolean {
@@ -65,5 +76,9 @@ export function loadPanelConfig(): PanelConfig {
       proxyBaseUrl: env('KNOWLEDGE_LLM_PROXY_BASE_URL', 'http://127.0.0.1:8096'),
     },
     agentTemplateDir: env('TDAI_AGENT_TEMPLATE_DIR', './data/agent-templates'),
+    evidence: {
+      proxyBaseUrl: env('EVIDENCE_PROXY_BASE_URL', 'http://127.0.0.1:8096'),
+      adminKey: env('EVIDENCE_PROXY_ADMIN_KEY', ''),
+    },
   };
 }

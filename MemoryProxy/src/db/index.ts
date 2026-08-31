@@ -49,16 +49,18 @@ function ensureDbDir(dbPath: string): void {
 /** Run schema creation + meta version bookkeeping. */
 function runSchema(db: Database.Database): void {
   db.exec(SCHEMA_SQL);
+  // SCHEMA_SQL is idempotent (IF NOT EXISTS), so existing DBs pick up new
+  // tables automatically; only the stored version needs an upsert when stale.
   const row = db
     .prepare("SELECT value FROM meta WHERE key = ?")
     .get("schema_version") as { value: string } | undefined;
-  if (!row) {
-    db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").run(
-      "schema_version",
-      String(SCHEMA_VERSION),
-    );
+  const stored = row ? Number(row.value) : 0;
+  if (stored < SCHEMA_VERSION) {
+    db.prepare(
+      "INSERT INTO meta (key, value) VALUES (?, ?) "
+      + "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run("schema_version", String(SCHEMA_VERSION));
   }
-  // Future: handle row.value < SCHEMA_VERSION → run migrations.
 }
 
 /**

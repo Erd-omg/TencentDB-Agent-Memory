@@ -7,6 +7,8 @@ import { extractUserQueryText } from "../../tdai/recorder.js";
 import type { CoreSkillConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs } from "./tdai-fixed-asset.js";
+import { withBlockAssets } from "../evidence.js";
+import type { AssetRef } from "../../db/asset-event.js";
 
 /**
  * L1 召回（"自有 + 借入"跨 agent 合并 top-K）：
@@ -105,7 +107,18 @@ export class TdaiL1RecallInjector implements InjectionHook {
     }
     lines.push("</tdai_recalled_l1_memories>");
 
-    return [
+    // 任务三 injected 证据：把实际注入的召回记忆打进块元数据。
+    const assets: AssetRef[] = merged.map((m) => ({
+      assetId: m.id,
+      assetType: "chat-memory",
+      name: m.content.replace(/\s+/g, " ").trim().slice(0, 60),
+      score: m.score,
+      source: m.fromAgentId === identity.agentId
+        ? "self"
+        : (m.fromAgentName ?? m.fromAgentId),
+    }));
+
+    return [withBlockAssets(
       {
         type: "text",
         content: lines.join("\n"),
@@ -115,6 +128,7 @@ export class TdaiL1RecallInjector implements InjectionHook {
           sources: ctxs.map((c) => c.agentId),
         },
       },
-    ];
+      assets,
+    )];
   }
 }

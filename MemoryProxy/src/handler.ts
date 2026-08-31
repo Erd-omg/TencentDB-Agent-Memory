@@ -48,6 +48,10 @@ import type { TdaiIdentity, TdaiMessage } from "./tdai/types.js";
 import { triggerSkillExtractIfReady } from "./skill/handler-glue.js";
 import { emitModelIntentTelemetry } from "./session/model-intent-telemetry.js";
 import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js";
+import { shouldAutoAppendReceipt, hasAssetEngagement } from "./evidence/task-completion.js";
+import { renderReceiptSummary } from "./evidence/receipt-summary.js";
+import { recordChatTurn } from "./evidence/turn-tracker.js";
+import { runAutoValidation } from "./evidence/auto-validate.js";
 import {
   enforceRateLimit,
   isRateLimitExceededError,
@@ -1232,9 +1236,12 @@ export async function handleChatCompletions(
   const tdaiUserMessage = extractLatestUserMessage(messages);
 
   // ── Context injection (before cost guard) ──────────────────────────────
+  const injectionTurnSeq = countHumanTurns(messages, "openai");
+  // 会话轮次跟踪（任务四 ②）：桥接事件在轮次间发生，需要当前轮次作为 turn_seq，
+  // 与注入事件的 turnSeq 同坐标系。只记主对话请求（aux 的 human 轮次会误导）。
+  if (!isAuxiliary) recordChatTurn(sessionKey, injectionTurnSeq);
   if (!injectedSkipped && config.injection?.enabled && config.injection.injectors.length > 0) {
     try {
-      const injectionTurnSeq = countHumanTurns(messages, "openai");
       const { getInjectionPipeline } = await import("./injection/index.js");
       const pipeline = getInjectionPipeline(config);
       const injectedBody = await pipeline.process(body, {
@@ -1579,6 +1586,7 @@ export async function handleChatCompletions(
       isAuxiliary,
       isDshHeadless: _dshHeadless,
       sessionInfo,
+      sessionJustRegistered,
       lf,
       spaceId,
       upstreamRequestId,
@@ -1593,13 +1601,14 @@ export async function handleChatCompletions(
   }
 
   // ── Non-streaming response ───────────────────────────────────────────────
-  const respText = await upstreamResp.text();
+  let respText = await upstreamResp.text();
   const endTime = new Date().toISOString();
 
+  let respJson: Record<string, unknown> | null = null;
   let usage: Record<string, unknown> | null = null;
   let assistantMessage: Record<string, unknown> | null = null;
   try {
-    const respJson = JSON.parse(respText) as Record<string, unknown>;
+    respJson = JSON.parse(respText) as Record<string, unknown>;
     if (respJson.usage && typeof respJson.usage === "object") {
       usage = respJson.usage as Record<string, unknown>;
     }
@@ -1612,6 +1621,39 @@ export async function handleChatCompletions(
     }
   } catch {
     // non-JSON upstream response
+  }
+
+  // ── 任务四 B：任务收尾自动追加简短回执（非流式路径）────────────────────
+  // 组合修复：注册轮（sessionJustRegistered）不计；assistantMessage.tool_calls 真实，
+  // 工具轮自动重置 streak；hasAssetEngagement 证据锚定 + 仅触发时消费 autoShown。
+  // 每会话只自动追加一次；失败静默，绝不阻塞业务。
+  if (!isAuxiliary && !sessionJustRegistered) {
+    try {
+      if (process.env.PROXY_DEBUG_AUTO_RECEIPT) {
+        console.log(`[auto-receipt] session=${sessionKey} aux=${isAuxiliary} toolCalls=${Array.isArray(assistantMessage?.tool_calls) ? assistantMessage.tool_calls.length : "n/a"}`);
+      }
+      if (shouldAutoAppendReceipt(sessionKey, assistantMessage, hasAssetEngagement(sessionKey))) {
+        // 任务四 ②：收尾自动验证 used-未-validated 的 skill（有界 await，
+        // 让回执直接带真实验证结果）。失败由外层 try/catch 兜住。
+        await runAutoValidation({ sessionKey, sessionInfo: sessionInfo ?? {}, config });
+        const autoSummary = renderReceiptSummary(sessionKey);
+        if (process.env.PROXY_DEBUG_AUTO_RECEIPT) {
+          console.log(`[auto-receipt] TRIGGER session=${sessionKey} summary=${autoSummary ? autoSummary.length : "null"}`);
+        }
+        if (autoSummary && respJson) {
+          const choices = Array.isArray(respJson.choices) ? respJson.choices : [];
+          const first = choices[0] as Record<string, unknown> | undefined;
+          const msg = first?.message as { content?: unknown } | undefined;
+          if (msg) {
+            const existing = typeof msg.content === "string" ? msg.content : "";
+            msg.content = `${existing}\n\n${autoSummary}`;
+            respText = JSON.stringify(respJson);
+          }
+        }
+      }
+    } catch {
+      // 自动回执失败绝不阻塞业务
+    }
   }
 
   const logMeta = responseLogMeta;
@@ -1894,6 +1936,8 @@ interface TapContext {
    * in tools) — behaves like aux for downstream side-effects. */
   isDshHeadless: boolean;
   sessionInfo: Record<string, unknown> | null | undefined;
+  /** 本请求是否刚刚完成 session-init 注册（注册轮的纯文本回复不应触发自动回执）。 */
+  sessionJustRegistered: boolean;
   /** Langfuse turn-trace context (trace = one turn). */
   lf: LangfuseTurnContext;
   /** Space/tenant ID from request path. */
@@ -1988,10 +2032,13 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
   const { config, modelId, keyId, sessionKey, upstreamUrl, traceId, forkTraceId, startTime, inputMessages, retried, logMeta, pipe, lf, spaceId, upstreamRequestId } = ctx;
 
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
   let sseBuf = "";
   let lastUsage: Record<string, unknown> | null = null;
   let assistantContent = "";
   const toolCallAccumulators = new Map<number, ToolCallAccumulator>();
+  // 任务四 ②：流式自动回执 —— 拦截 SSE 末尾的 `data: [DONE]`，在它之前插入回执块。
+  let doneHeld: Uint8Array | null = null;
 
   function processSseChunk(chunk: string): void {
     sseBuf += chunk;
@@ -2263,16 +2310,63 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
 
   return new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      controller.enqueue(chunk);
       try {
-        processSseChunk(decoder.decode(chunk, { stream: true }));
+        const text = decoder.decode(chunk, { stream: true });
+        if (!doneHeld) {
+          const doneIdx = text.indexOf("data: [DONE]");
+          if (doneIdx !== -1) {
+            // 拦截 [DONE]：之前的内容照常 enqueue，[DONE] 事件 held 到 flush 再决定。
+            const before = text.slice(0, doneIdx);
+            if (before.length > 0) controller.enqueue(encoder.encode(before));
+            doneHeld = encoder.encode(text.slice(doneIdx));
+          } else {
+            controller.enqueue(chunk);
+          }
+        }
+        processSseChunk(text);
       } catch (err: unknown) {
+        controller.enqueue(chunk);
         pipe.error("STREAM_TAP", err);
       }
     },
-    async flush() {
+    async flush(controller) {
       try {
         await finalize();
+        // 任务四 ②：任务收尾自动回执（流式）—— 组合修复：
+        //   注册轮（sessionJustRegistered）不计 streak；工具轮重置 streak；
+        //   有 used/selected 证据（粘性）且连续 2 个无工具轮才触发；
+        //   autoShown 仅在真正触发时消费（修 double-bug：无证据不吞触发机会）。
+        if (!ctx.isAuxiliary && !ctx.sessionJustRegistered) {
+          try {
+            const hasTool = toolCallAccumulators.size > 0;
+            if (shouldAutoAppendReceipt(
+              ctx.sessionKey,
+              hasTool ? { tool_calls: [{}] } : { tool_calls: [] },
+              hasAssetEngagement(ctx.sessionKey),
+            )) {
+              const summary = renderReceiptSummary(ctx.sessionKey);
+              if (summary) {
+                const chunkObj = {
+                  id: ctx.upstreamRequestId ?? `chatcmpl-auto-receipt-${Date.now()}`,
+                  object: "chat.completion.chunk",
+                  choices: [{ index: 0, delta: { content: `\n\n${summary}` }, finish_reason: null }],
+                };
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunkObj)}\n\n`));
+              }
+              // 任务四 ②：流式路径不阻塞 [DONE] —— 自动验证 fire-and-forget，
+              // 回执反映验证前状态，结果随后续 mem:receipt 呈现。
+              void runAutoValidation({
+                sessionKey: ctx.sessionKey,
+                sessionInfo: ctx.sessionInfo ?? {},
+                config: ctx.config,
+              });
+            }
+          } catch (err: unknown) {
+            pipe.error("AUTO_RECEIPT", err);
+          }
+        }
+        // 恢复被拦截的 [DONE]（回执块在其之前）。
+        if (doneHeld) controller.enqueue(doneHeld);
       } catch (err: unknown) {
         pipe.error("STREAM_FINALIZE", err);
       }

@@ -14,23 +14,40 @@ const HELP_TEXT = `## 支持的 mem: 命令
 | \`mem:create-skill [提示词]\` | 把本次对话归档为 Skill，后台异步提取 |
 | \`mem:create-task [标题]\` | 从当前会话上下文创建 Task 并绑定到本 session |
 | \`mem:update-task [新描述]\` | 更新已绑定 Task 的描述 |
+| \`mem:receipt\` | 资产使用回执：本次会话用了哪些资产、走到哪个阶段、效果状态（来自证据链事件表） |
+| \`mem:validate [--all|资产id]\` | 真实校验资产（跑校验命令）：默认 used/selected，--all 全量；exit 0 → validated |
+| \`mem:correct <资产id> [原因]\` | 用户/评审主动纠正资产：落 corrected 事件（evidence.source=user） |
 | \`mem:help\` | 显示本帮助 |
 
 ---
 
-### 🆕 \`mem:create-task\` — 创建并绑定 Task
+### 🆕 \`mem:receipt\` — 资产使用回执（任务三/四证据链展示）
 
-**用法**
-- **无参数**：LLM 从最近对话中推断 title + description
-- **有参数**：参数作为 title（40 字截断），LLM 只生成 description
+从 asset_event 证据链表聚合本会话的资产使用事实：应用了哪些资产（类型/来源/版本）、
+各自走到证据链哪个阶段（注入→使用→已验证/已纠正）、每项最新证据。**非模型自述，可回溯**。
 
-**若本 session 已绑真实 Task**，返回新 Task 预览，回复以下之一：
+---
 
-| 回复 | 效果 |
-|------|------|
-| \`mem:create-task confirm\` | ✅ 覆盖绑定，创建新 Task |
-| \`mem:update-task\` 或 \`mem:update-task <新描述>\` | ⭐ **推荐** — 继续复用当前 Task，只更新描述 |
-| \`mem:create-task cancel\` | 🚫 取消，不做任何改动 |
+### 🆕 \`mem:validate\` — 资产真实校验（任务三 validated/corrected）
+
+按配置校验命令**真实执行**（真实进程/exit code/输出）：
+- **\`mem:validate\`**：校验本会话**已使用/已选中**且未纠正的、有校验规则的全部资产
+- **\`mem:validate --all\`**：校验本会话**全部**有规则的资产（除已纠正）
+- **\`mem:validate <assetId>\`**：只校验指定资产（如 \`mem:validate skl-xxx\`）
+
+exit 0 → 落 \`validated\` 事件；非 0 → 落 \`corrected\` 事件（资产被证明不通过/不适用）。
+已纠正资产默认跳过（纠正已否定该资产，避免"已验证+已纠正"矛盾 + F4 误报）。
+
+---
+
+### ✏️ \`mem:correct\` — 用户主动纠正资产（赛题 F3 corrected 用户反馈路径）
+
+验证器只能靠跑测试判错；但用户/评审**主动发现**资产有错、过期或不适用时，用
+\`mem:correct\` 直接落一条 \`corrected\` 事件（\`evidence.source = "user"\`）。
+
+- 只允许纠正**本会话已进入证据链**的资产（recalled/used/validated 过）—— 不能凭空
+  纠正一个从没出现过的资产，否则证据链失真。
+- 可附原因：\`mem:correct skl-xxx 里面的命令过时了，新版 API 已改名\`
 
 ---
 
@@ -63,6 +80,10 @@ mem:create-task cancel
 mem:update-task 补充今天完成的进度与遗留风险
 mem:update-task confirm
 mem:update-task cancel
+mem:receipt
+mem:validate
+mem:validate skl-xxx
+mem:correct skl-xxx 命令过时，需要更新
 mem:session-reset
 mem:help
 \`\`\`

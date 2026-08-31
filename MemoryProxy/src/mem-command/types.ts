@@ -47,7 +47,10 @@ export type MemCommandName =
   | "sync"
   | "create-skill"
   | "create-task"
-  | "update-task";
+  | "update-task"
+  | "validate"
+  | "receipt"
+  | "correct";
 
 export interface MemCommandResult {
   success: boolean;

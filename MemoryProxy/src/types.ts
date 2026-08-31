@@ -512,6 +512,9 @@ export interface ProxyConfig {
    */
   memCommand: MemCommandConfig;
 
+  /** 任务三 validated/corrected 验证器配置（mem:validate）。可选，缺省关闭。 */
+  validation?: ValidationConfig;
+
   /**
    * CC 请求分流总开关。
    *
@@ -572,6 +575,28 @@ export interface MemCommandConfig {
   };
 }
 
+/**
+ * 任务三 validated/corrected 验证器配置。
+ *
+ * rules 把「资产类型 → 校验命令模板」；命令真实执行（真实进程/exit code/输出），
+ * `{file}` 会被替换为资产正文临时文件路径。exit 0 → validated，否则 corrected。
+ * 详见 docs/competition-task4-understanding.md §9 任务三。
+ */
+export interface ValidationConfig {
+  /** 是否启用资产验证（mem:validate）。默认 false。 */
+  enabled: boolean;
+  /** 命令执行超时 ms。默认 30000。 */
+  timeoutMs?: number;
+  /** 资产类型（skill / chat-memory / …）→ 校验命令模板。 */
+  rules: Record<string, string>;
+  /**
+   * 任务收尾自动验证（任务四 ②）：shouldAutoAppendReceipt 触发时，自动对
+   * "已使用但未验证"的 skill 跑验证器（有界，默认 ≤3 项）。非流式 await、
+   * 流式 fire-and-forget。缺省随 validation.enabled 开启。
+   */
+  autoValidateOnCompletion?: boolean;
+}
+
 /** Context injection configuration. */
 export interface InjectionConfig {
   enabled: boolean;
@@ -615,6 +640,13 @@ export interface InjectionConfig {
    */
   assetReflection?: {
     markerOptIn: boolean;
+  };
+  /**
+   * 任务三「资产使用链路记录与可信归因」的 injected 证据打点。
+   * 缺省 enabled（每轮注入的资产落 asset_event，成本极低、静默降级）。
+   */
+  assetEvidence?: {
+    enabled?: boolean;
   };
 }
 
@@ -823,6 +855,9 @@ export interface RawYamlConfig {
     assetReflection?: {
       markerOptIn?: boolean;
     };
+    assetEvidence?: {
+      enabled?: boolean;
+    };
   };
   extraction?: {
     enabled?: boolean;
@@ -891,6 +926,12 @@ export interface RawYamlConfig {
       apiKey?: unknown;
       timeoutMs?: unknown;
     };
+  };
+  /** 任务三 validated/corrected 验证器配置（与 ProxyConfig.validation 对应）。 */
+  validation?: {
+    enabled?: unknown;
+    timeoutMs?: unknown;
+    rules?: Record<string, unknown>;
   };
 }
 

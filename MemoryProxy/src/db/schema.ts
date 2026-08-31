@@ -1,15 +1,18 @@
 /**
  * SQLite schema for MemoryProxy local persistence.
  *
- * Two tables:
- *   - sessions:    persists session metadata (sessionInfo / agentDetail / taskDetail).
- *   - hook_cache:  persists prewarmed injection blocks per (session_id, hook_id).
+ * Three tables:
+ *   - sessions:     persists session metadata (sessionInfo / agentDetail / taskDetail).
+ *   - hook_cache:   persists prewarmed injection blocks per (session_id, hook_id).
+ *   - asset_event:  persists the asset usage evidence chain
+ *                   (recalled/selected/injected/used/validated/corrected/contributed)
+ *                   — task 3「资产使用链路记录与可信归因」的落库点。
  *
  * Schema is created with `IF NOT EXISTS` so it's safe to call on every startup.
  * `schema_version` row in `meta` table allows future migrations.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -49,4 +52,32 @@ CREATE TABLE IF NOT EXISTS hook_cache (
   PRIMARY KEY (session_id, hook_id),
   FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
+
+-- 资产使用证据链（任务三）。每条记录 = 一个资产在某一阶段的一个事实事件。
+-- stage 为稳定枚举（recalled/selected/injected/used/validated/corrected/contributed），
+-- 便于 GROUP BY 聚合回执；evidence_json 存结构化证据（工具调用/diff/验证器结果）。
+CREATE TABLE IF NOT EXISTS asset_event (
+  id             TEXT PRIMARY KEY,
+  stage          TEXT NOT NULL,
+  asset_id       TEXT NOT NULL,
+  asset_type     TEXT NOT NULL,
+  asset_version  TEXT,
+  asset_name     TEXT,
+  score          REAL,
+  source_tag     TEXT,
+  session_key    TEXT NOT NULL DEFAULT '',
+  session_id     TEXT,
+  task_id        TEXT,
+  agent_id       TEXT,
+  team_id        TEXT,
+  user_id        TEXT,
+  turn_seq       INTEGER,
+  evidence_json  TEXT,
+  confidence     TEXT,
+  created_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_event_session ON asset_event(session_key);
+CREATE INDEX IF NOT EXISTS idx_asset_event_stage   ON asset_event(stage);
+CREATE INDEX IF NOT EXISTS idx_asset_event_asset   ON asset_event(asset_id);
 `;

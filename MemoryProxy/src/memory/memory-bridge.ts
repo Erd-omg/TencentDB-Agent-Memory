@@ -29,6 +29,8 @@ import type { AgentContext } from "../injection/types.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "../injection/injectors/tdai-fixed-asset.js";
 import type { TdaiIdentity } from "../tdai/types.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "./bridge-telemetry.js";
+import { emitRecalledEvents, emitSelectedEvents, emitUsedEvents, memoryAssetsFromItems, memoryDirectReadAssets, type UsedEventSource } from "../evidence/used-evidence.js";
+import { currentChatTurn } from "../evidence/turn-tracker.js";
 
 const TAG = "[memory-bridge]";
 
@@ -462,6 +464,30 @@ export function createMemoryBridgeHandler(
       const elapsed = (deps.now ?? Date.now)() - t0;
       console.log(`${TAG} sub=${sub} multi targets=${ctxs.length} ok=${okCount} ${resultKey}=${collected.length} elapsed=${elapsed}ms`);
       const truncated = collected.slice(0, limit);
+
+      // ── recalled 证据（任务三，赛题 F1）：atomic/search 的 L1 命中逐条落 recalled 事件 ──
+      // conversation/search 返回的是 L0 消息（不是资产），不打点。独立于 LLM 自述。
+      // 语义：search 只是"召回候选"（recalled），不是"使用"（used）—— 模型还需要
+      // 定向读取（atomic/query / scenario/read）才把内容用于决策，那才是 used。
+      // sessionKey 用原始 x-conversation-id，与 injected 事件/回执对齐。
+      if (sub === "atomic/search" && truncated.length > 0) {
+        emitRecalledEvents({
+          sessionKey,
+          sessionId: ids.session_id ?? sessionKey,
+          taskId: effectiveTaskId,
+          agentId: ids.agent_id,
+          teamId: ids.team_id,
+          userId: ids.user_id,
+          bridge: "memory-bridge",
+          endpoint: sub,
+          query: typeof inboundBody.query === "string" ? inboundBody.query : undefined,
+          // httpStatus: 200 是准确的 —— 上面的过滤器（:443）已把所有非 2xx target
+          // continue 掉，能走到这里聚合的都是成功响应；多 target 聚合无单一 status 可表。
+          httpStatus: 200,
+          turnSeq: currentChatTurn(sessionKey),
+        }, memoryAssetsFromItems(truncated));
+      }
+
       const searchedAgents = ctxs.map((x) => ({
         agent_id: x.agentId,
         name: x.agentName,
@@ -495,6 +521,34 @@ export function createMemoryBridgeHandler(
     const respText = upstream.text;
     const elapsed = (deps.now ?? Date.now)() - t0;
     console.log(`${TAG} sub=${sub} status=${upstream.status} elapsed=${elapsed}ms`);
+
+    // ── 定向读取证据（任务四 ② 证据补充）：atomic/query / scenario/read 2xx 时 ──
+    // 对齐 skill get-by-name：把内容带进决策 → selected + used（不是 search 的 recalled）。
+    // sessionId 用真实 session_id（D5），turnSeq 从 turn-tracker 取（D2）。解析失败
+    // 返回 [] → 不造伪证据。静默降级：DB 不可用时 emitters 直接 no-op。
+    if (upstream.status >= 200 && upstream.status < 300
+        && (sub === "atomic/query" || sub === "scenario/read")) {
+      const directAssets = memoryDirectReadAssets(
+        sub,
+        respText,
+        typeof inboundBody.path === "string" ? inboundBody.path : undefined,
+      );
+      const src: UsedEventSource = {
+        sessionKey,
+        sessionId: ids.session_id ?? sessionKey,
+        taskId: effectiveTaskId,
+        agentId: ids.agent_id,
+        teamId: ids.team_id,
+        userId: ids.user_id,
+        bridge: "memory-bridge",
+        endpoint: sub,
+        query: typeof inboundBody.query === "string" ? inboundBody.query : undefined,
+        httpStatus: upstream.status,
+        turnSeq: currentChatTurn(sessionKey),
+      };
+      emitSelectedEvents(src, directAssets);
+      emitUsedEvents(src, directAssets);
+    }
 
     return new Response(respText, {
       status: upstream.status,

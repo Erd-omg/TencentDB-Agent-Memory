@@ -6,6 +6,8 @@ import { getTdaiIdentity } from "../../tdai/identity.js";
 import type { CoreSkillConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "./tdai-fixed-asset.js";
+import { withBlockAssets } from "../evidence.js";
+import type { AssetRef } from "../../db/asset-event.js";
 
 /**
  * L2/L3 注入（按 openclaw / hermes 官方做法重构）：
@@ -127,7 +129,17 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
     lines.push("");
     lines.push(MEMORY_TOOLS_GUIDE);
 
-    return [
+    // 任务三 injected 证据：L3 长期画像（全文实际注入）作为 profile 资产打标。
+    const assets: AssetRef[] = groups
+      .filter((g) => g.l3)
+      .map((g) => ({
+        assetId: `profile:${g.ctx.agentId}`,
+        assetType: "profile",
+        name: g.ctx.agentName || g.ctx.agentId,
+        source: g.ctx.isSelf ? "self" : "imported_from",
+      }));
+
+    return [withBlockAssets(
       {
         type: "text",
         content: lines.join("\n"),
@@ -139,7 +151,8 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
           mode: "index+tools",
         },
       },
-    ];
+      assets,
+    )];
   }
 }
 
