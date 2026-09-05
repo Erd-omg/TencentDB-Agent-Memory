@@ -84,7 +84,7 @@ validated|6
 
 ## 诚实边界
 
-> ⚠️ 本走查为 2026-08-27（round-1 深化）。**2026-08-28 二轮已把「memory 定向读取」推进落地**（见 docs §15.4），以下第 2 条旧边界已不成立，round-2 走查见 `results/codebuddy-live-4/`。
+> ⚠️ 本走查为 2026-08-27（round-1 深化）。**2026-08-28 二轮已把「memory 定向读取」推进落地**（见 docs §15.4），以下第 2 条旧边界已不成立，round-2 走查见 `results/archive/gui-legacy/codebuddy-live-4/`。
 
 - **F2** decision/code_diff/outcome 接口就位但 bridge 打点只填 tool_call —— 归因字段待决策/diff 钩子接入。
 - ~~memory 定向读取（atomic/query、scenario/read）不落 selected/used（当前仅 search→recalled）~~ → **已落地**（D1，round-2）。

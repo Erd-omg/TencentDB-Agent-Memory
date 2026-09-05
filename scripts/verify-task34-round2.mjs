@@ -2,7 +2,7 @@
 /**
  * verify-task34-round2.mjs — 任务三/四 二轮新功能端到端实测（脚本化 GUI 走查等价）。
  *
- * 覆盖（docs/verify-task34-round2.md §3 Step 1–7 的自动化等价，真实 CodeBuddy 请求形态）：
+ * 覆盖（docs/codebuddy-gui-walkthrough.md Step 1–7 的自动化等价，真实 CodeBuddy 请求形态）：
  *   Step 1–2  会话初始化表单注册 + 注入
  *   Step 3    D1 memory 定向读取（scenario/read + atomic/query）→ Chat-Memory 到 used
  *   Step 4    B  Markdown 折叠回执：默认 / --full / --json（含 turn_seq）/ <assetId> 深潜
@@ -13,8 +13,8 @@
  *
  * 用法：
  *   node scripts/verify-task34-round2.mjs
- * 产物：stdout 走查日志 + results/codebuddy-live-4/{evidence-chain.txt,evidence-db.jsonl,
- *       session-key.txt, stages.txt}
+ * 产物：stdout 走查日志 + results/archive/gui-legacy/codebuddy-live-4/{evidence-chain.txt,
+ *       evidence-db.jsonl, session-key.txt, stages.txt}
  * 依赖：MemoryProxy :8097 + MemoryCore :8420（config.yaml 已开 memCommand/validation/clickhouse）。
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -38,7 +38,7 @@ const require = createRequire(join(ROOT, "MemoryProxy", "package.json"));
 const Database = require("better-sqlite3");
 const DB_PATH = process.env.PROXY_DB_PATH || join(os.homedir(), ".tdai-memory-proxy", "proxy.db");
 
-const OUT_DIR = join(ROOT, "results", "codebuddy-live-4");
+const OUT_DIR = join(ROOT, "results", "archive", "gui-legacy", "codebuddy-live-4");
 const URL = `${PROXY}/${AGENT}/${SPACE_ID}/v1/chat/completions`;
 const HDRS = {
   "Content-Type": "application/json",
@@ -227,7 +227,7 @@ console.log(`      ${receiptAfter.split("\n").filter((l) => /有效性|已验证
 assert(/✅ 已通过测试验证/.test(receiptAfter) || /已通过测试验证/.test(receiptAfter), `被自动验证的 used skill 显示 ✅ 已通过测试验证`);
 
 // ── 12. 留证：导出 DB 证据 ─────────────────────────────────────────────
-console.log("\n[12] 导出留证 → results/codebuddy-live-4/");
+console.log("\n[12] 导出留证 → results/archive/gui-legacy/codebuddy-live-4/");
 mkdirSync(OUT_DIR, { recursive: true });
 const all = queryEvents();
 const stages = all.reduce((acc, e) => { acc[e.stage] = (acc[e.stage] || 0) + 1; return acc; }, {});

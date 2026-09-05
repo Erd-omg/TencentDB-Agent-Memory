@@ -111,6 +111,12 @@ MemoryCore/scripts/tests/
 # Backup files
 *.bak
 
+# Local-only archive (A/B measurement, Issue #120): stage telemetry dirs,
+# measurement report, and stage-run scripts — kept locally, never pushed
+results/archive/stage-*/
+results/archive/runtime-measurement-report.md
+scripts/archive/
+
 # self-implement-wiki e2e 产物（人工查看用，不入库）
 docs/knowledge/self-implement-wiki/_e2e-output/
 
@@ -125,6 +131,10 @@ data/tdai-memory.db
 **/data/knowledge.db-wal
 **/data/_wiki_engines/
 **/data/mem-*/
+
+# Agent session memory (jsonl) & per-deployment knowledge runtime data (never commit)
+/.claude/
+MemoryKnowledge/data/
 
 # Test coverage output
 coverage/

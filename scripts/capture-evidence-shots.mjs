@@ -7,7 +7,7 @@
  *   展开「证据 / 决策」details（tool_call / test_result）→ r2-08-panel-evidence-expanded.png
  *
  * 用法：
- *   node scripts/capture-evidence-shots.mjs [--out results/codebuddy-live-4]
+ *   node scripts/capture-evidence-shots.mjs [--out results/archive/gui-legacy/codebuddy-live-4]
  * 依赖：Panel :8125（源码版，含 evidence 代理）+ proxy :8097 + core :8420。
  */
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
@@ -23,8 +23,10 @@ const PORT = 9334;
 const USER_DATA_DIR = "/tmp/chrome-evidence-profile";
 const PANEL = process.env.PANEL_BASE || "http://localhost:8125";
 const KEY = process.env.USER_KEY || readFileSync(join(ROOT, "deploy/global-images/.admin-key"), "utf8").trim();
-const OUT_DIR = process.env.OUT_DIR || join(ROOT, "results", "codebuddy-live-4");
+const OUT_DIR = process.env.OUT_DIR || join(ROOT, "results", "archive", "gui-legacy", "codebuddy-live-4");
 const WAIT_MS = Number(process.env.WAIT_MS || 3500);
+// SESSION 可选：⑨ Panel 深链预选 —— 打开 #/evidence?session=<key> 应自动定位该会话。
+const SESSION = process.env.SESSION || "";
 
 class CDP {
   constructor(ws) { this.ws = ws; this.id = 0; this.pending = new Map(); ws.addEventListener("message", (ev) => { const m = JSON.parse(ev.data); if (m.id && this.pending.has(m.id)) { const { resolve, reject } = this.pending.get(m.id); this.pending.delete(m.id); m.error ? reject(new Error(JSON.stringify(m.error))) : resolve(m.result); } }); }
@@ -78,15 +80,20 @@ async function main() {
   await sleep(2500);
   console.log(`[evidence-shots] session injected user=${uid}`);
 
-  // 打开资产回执页
-  await cdp.send("Page.navigate", { url: PANEL + "/#/evidence" });
+  // 打开资产回执页（SESSION 给定时走 ⑨ 深链预选 #/evidence?session=<key>）
+  const evidenceUrl = PANEL + "/#/evidence" + (SESSION ? `?session=${encodeURIComponent(SESSION)}` : "");
+  await cdp.send("Page.navigate", { url: evidenceUrl });
   await sleep(WAIT_MS);
   await sleep(1200);
 
   // DOM 校验：确认页面真的渲染了回执数据（非空白/登录页）
   const pageText = await evaljs(cdp, `document.body.innerText.slice(0, 1500)`);
-  const markers = (pageText || "").split("\n").filter((l) => l.trim()).slice(0, 8).join(" | ");
-  console.log(`[evidence-shots] evidence page DOM: 「${markers.slice(0, 200)}」`);
+  const hash = await evaljs(cdp, `location.hash`);
+  console.log(`[evidence-shots] evidence page URL hash: ${hash}`);
+  console.log(`[evidence-shots] evidence page DOM: 「${(pageText || "").split("\n").filter((l) => l.trim()).slice(0, 8).join(" | ").slice(0, 200)}」`);
+  if (SESSION && hash && !hash.includes(`session=${SESSION}`)) {
+    console.warn(`[evidence-shots] ⚠️ hash 未含 session=${SESSION}（${hash}）—— 深链预选可能未生效`);
+  }
   if (!/(证据|回执|已通过测试验证|仅背景参考|会话|Skill)/.test(pageText || "")) {
     console.error("[evidence-shots] ❌ 页面未渲染回执内容（可能未登录或证据页无数据）");
   }

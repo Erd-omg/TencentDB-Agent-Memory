@@ -10,8 +10,8 @@ const ROOT = join(__dirname, "..");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = 9344;
 const USER_DATA_DIR = "/tmp/chrome-task234-demo";
-const URL = "file://" + join(ROOT, "results/task234-demo/index.html");
-const OUT = join(ROOT, "results/task234-demo");
+const URL = "file://" + join(ROOT, "results/archive/task234-demo/index.html");
+const OUT = join(ROOT, "results/archive/task234-demo");
 
 class CDP {
   constructor(ws) { this.ws = ws; this.id = 0; this.pending = new Map();

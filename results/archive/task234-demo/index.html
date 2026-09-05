@@ -253,6 +253,7 @@
   .callout.good { border-color: var(--good); background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
   .callout b { font-weight: 700; }
   .callout .src { font-size: 11.5px; color: var(--muted-ink); margin-top: 4px; }
+  .block-mock { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 1.55; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-x: auto; color: var(--secondary-ink); margin: 4px 0 0; }
 
   .viewpoint { border: 1px solid var(--border); border-left: 3px solid var(--series-2); background: var(--surface); border-radius: 0 10px 10px 0; padding: 12px 14px; margin-bottom: 10px; }
   .viewpoint .vp-t { font-weight: 700; font-size: 13.5px; margin-bottom: 3px; }
@@ -328,20 +329,34 @@
     <div class="grid-2">
       <div>
         <div class="card">
-          <h3>② 混合召回 + ③ 多阶段重排</h3>
-          <p class="meta">BM25 + 向量 + RRF 融合召回；再按六维重排。<span class="muted">重排权重：</span></p>
+          <h3>② 混合召回 + ③ 六维重排</h3>
+          <p class="meta">core 混合检索召回 → 六维重排。<span class="muted">重排权重：</span></p>
           <div>
             <span class="wchip">相关性 0.40</span><span class="wchip">可信度 0.15</span><span class="wchip">历史效果 0.15</span><span class="wchip">新鲜度 0.10</span><span class="wchip">环境兼容性 0.10</span><span class="wchip">Token 成本 0.10</span>
           </div>
           <table class="score">
-            <thead><tr><th>候选资产</th><th>BM25</th><th>向量</th><th>RRF 融合</th><th>重排后</th><th>selected</th></tr></thead>
+            <thead><tr><th>候选资产</th><th>相关度</th><th>六维加权</th><th>重排后</th><th>selected</th></tr></thead>
             <tbody id="cand-tbody"></tbody>
           </table>
-          <p class="small muted" style="margin:6px 0 0">「selected」= 通过任务相关性筛选（RRF ≥ 0.60）。被标记「筛选排除」的候选仅停留在 recalled，不会进入注入。这才是任务三证据链里 selected 的真实依据。</p>
+          <p class="small muted" style="margin:6px 0 0"><b>口径</b>（2026-09 对齐真实实现）：「相关度」= core <code>/v3/skill/search</code> score（当前 core 实现为 BM25，候选集内 min-max 归一化到 [0,1]；RRF 融合是 core 后续项，口径不变）；「六维加权」= 相关性×0.40 + 可信度×0.15 + 历史效果×0.15 + 新鲜度×0.10 + 环境兼容性×0.10 + Token成本×0.10。「selected」= 加权总分 ≥ 0.55 且名次 ≤ 5（双条件，与 config.yaml `selectedThreshold: 0.55` 一致）。被标记「筛选排除」的候选仅停留在 recalled，不会进入注入——这就是任务三证据链里 <code>selected(decision="rerank")</code> 的真实依据。</p>
           <div class="callout warn">
             <b>召回 ≠ 命中即有用。</b>CodeRAG-Bench 实测：gold 文档显著提升 SWE-Bench 27.4%，但当前检索器对仓库级任务的**有用上下文召回率有限**——这正是任务二用「六维重排」而不是单纯提高 top-k 的原因。
             <div class="src">Wang et al., CodeRAG-Bench, NAACL 2024</div>
           </div>
+          <p class="small muted" style="margin:10px 0 2px">真实注入格式（proxy 端 <code>&lt;task2_selected_assets&gt;</code> 指针块，session_init 预热缓存；全文用 skill_view 定向读取）：</p>
+          <pre class="block-mock">&lt;task2_selected_assets&gt;
+与当前任务「云主机迁移平台 v1」最相关的团队资产（六维重排入选，按适用度排序；需要全文时用 skill_view / skill-bridge 定向读取）：
+任务分类：devops → 需要资产类型（按相关度）：历史方案 > 失败经验 > Skill > 项目约定 > 产品知识 > 代码知识
+1. [项目约定] memory-hub-asset-guide
+   为什么适用：本地 base URL 降级、默认工具地址不可达时用户约定…
+   ✓ 入选 · 相关0.82 可信0.50 新鲜0.99 环境1.00 效果0.70 成本0.95 · 加权0.80 · 来源：self
+2. [失败经验] cloud-migration-postmortems
+   为什么适用：NTFS ACL 与 VSS provider、迁移 Windows 虚机…
+   ✓ 入选 · 相关0.41 可信1.00 新鲜0.85 环境1.00 效果0.90 成本0.94 · 加权0.73 · 来源：self
+5. [项目约定] migration-expert-tips（跨 agent 专家经验）
+   ✓ 入选 · 相关0.55 可信0.60 新鲜0.90 环境0.70 效果0.80 成本0.95 · 加权0.59 · 来源：agt-jyeano3vah
+另：N 项入选但超出 token 预算未注入（mem:sync 可调大预算）。
+&lt;/task2_selected_assets&gt;</pre>
         </div>
       </div>
 
@@ -351,7 +366,7 @@
           <p class="meta">只对「selected」集合裁剪。拖拽 Token 预算，观察最小但充分的上下文如何形成（避免把大量无关历史直接注入）。</p>
           <div class="budget-row">
             <label for="budget">Token 预算</label>
-            <input type="range" id="budget" min="600" max="10000" step="200" value="4000" oninput="renderBudget(this.value)">
+            <input type="range" id="budget" min="600" max="10000" step="200" value="800" oninput="renderBudget(this.value)">
             <span class="chip" id="budget-val">4,000</span>
           </div>
           <div class="budget-meter" id="budget-meter"></div>
@@ -448,29 +463,35 @@ const typeColor = t => ({
 }[t] || "var(--muted-ink)");
 
 /* ============================================================
- * PANEL 1 — retrieval candidates（六类团队资产，覆盖历史经验/代码/文档/Skill/产品知识）
+ * PANEL 1 — retrieval candidates（六类团队资产）
+ * 口径（2026-09 对齐真实实现，替换早前的虚构 BM25/向量/RRF 三列）：
+ *   rel   = 相关度：core /v3/skill/search score（当前 core 实现为 BM25，
+ *           候选集内 min-max 归一化到 [0,1]；RRF 融合是 core 后续项，口径不变）
+ *   score = 六维加权总分：相关性0.40×rel + 可信度0.15 + 历史效果0.15 + 新鲜度0.10
+ *           + 环境兼容性0.10 + Token成本0.10（各维归一到 [0,1]）
+ *   selected = score ≥ SEL_THRESHOLD AND rank ≤ TOPN（双条件）
  * ============================================================ */
 const candidates = [
-  { id: "a1", name: "NTFS ACL → VSS 快照转向（上次故障转向方案）", type: "历史方案", bm25: .82, emb: .74, rrf: .91, rerank: 1, tokens: 520,  hist: "3 次命中修复", why: "本次同为 ACL 校验失败，方案同源" },
-  { id: "a2", name: "云主机迁移一键迁移 SOP",                       type: "Skill",   bm25: .66, emb: .88, rrf: .87, rerank: 2, tokens: 1400, hist: "2 次成功复用", why: "任务即迁移工具 Bug Fix，SOP 覆盖定位步骤" },
-  { id: "a3", name: "上次「ACL 校验在快照前执行」导致校验失效",     type: "失败经验", bm25: .71, emb: .61, rrf: .79, rerank: 3, tokens: 610,  hist: "1 次规避返工", why: "同一模块同一失败模式，直接提示时序风险" },
-  { id: "a4", name: "acl_migrate.ts 调用关系与影响路径",            type: "代码知识", bm25: .58, emb: .79, rrf: .74, rerank: 4, tokens: 860,  hist: "—", why: "本次改动文件即 acl_migrate.ts，需影响路径分析" },
-  { id: "a5", name: "部署环境约定：CentOS 7.9 + 快照目录预留 1.5×源盘", type: "项目约定", bm25: .55, emb: .60, rrf: .66, rerank: 5, tokens: 480, hist: "1 次成功", why: "校验失败涉及回滚路径，需符合环境约定" },
-  { id: "a6", name: "产品知识：迁移须幂等、失败可安全重试",          type: "产品知识", bm25: .44, emb: .50, rrf: .52, rerank: 6, tokens: 700,  hist: "—", why: "影响重试语义，但对本次 Bug 定位非关键（低相关）" },
+  { id: "a1", name: "NTFS ACL → VSS 快照转向（上次故障转向方案）", type: "历史方案", rel: .91, score: .86, rerank: 1, tokens: 520,  hist: "3 次命中修复", why: "本次同为 ACL 校验失败，方案同源", source: "self" },
+  { id: "a2", name: "云主机迁移一键迁移 SOP",                       type: "Skill",   rel: .66, score: .79, rerank: 2, tokens: 1400, hist: "2 次成功复用", why: "任务即迁移工具 Bug Fix，SOP 覆盖定位步骤", source: "self" },
+  { id: "a3", name: "上次「ACL 校验在快照前执行」导致校验失效",     type: "失败经验", rel: .71, score: .74, rerank: 3, tokens: 610,  hist: "1 次规避返工", why: "同一模块同一失败模式，直接提示时序风险", source: "self" },
+  { id: "a4", name: "acl_migrate.ts 调用关系与影响路径",            type: "代码知识", rel: .58, score: .68, rerank: 4, tokens: 860,  hist: "—", why: "本次改动文件即 acl_migrate.ts，需影响路径分析", source: "team" },
+  { id: "a5", name: "迁移专家经验（跨 agent：migration-expert-tips）", type: "项目约定", rel: .55, score: .62, rerank: 5, tokens: 480, hist: "2 次成功", why: "跨用户推荐：另一 agent 沉淀，同任务型已验证有效", source: "agt-jyeano3vah" },
+  { id: "a6", name: "产品知识：迁移须幂等、失败可安全重试",          type: "产品知识", rel: .44, score: .52, rerank: 6, tokens: 700,  hist: "—", why: "影响重试语义，但对本次 Bug 定位非关键（低相关）", source: "team" },
 ];
-const SEL_THRESHOLD = 0.60;
+const SEL_THRESHOLD = 0.55;
+const TOPN = 5;
 
 function renderCandidates() {
   const tb = document.getElementById("cand-tbody");
   tb.innerHTML = candidates.map(c => {
     const pct = v => Math.round(v * 100);
     const mk = (v, color) => `<span class="num">${pct(v)}<span class="mini-bar"><i style="width:${pct(v)}%;background:${color}"></i></span></span>`;
-    const sel = c.rrf >= SEL_THRESHOLD;
+    const sel = c.score >= SEL_THRESHOLD && c.rerank <= TOPN;
     return `<tr>
       <td><span class="pill ${typePill(c.type)}">${esc(c.type)}</span> ${esc(c.name)}<br><span class="small muted">适用：${esc(c.why)}</span></td>
-      <td class="num">${mk(c.bm25, "var(--muted-ink)")}</td>
-      <td class="num">${mk(c.emb, "var(--muted-ink)")}</td>
-      <td class="num">${mk(c.rrf, "var(--series-1)")}</td>
+      <td class="num">${mk(c.rel, "var(--muted-ink)")}</td>
+      <td class="num">${mk(c.score, "var(--series-1)")}</td>
       <td class="num"><b>${c.rerank}</b></td>
       <td>${sel ? `<span class="selmark on">✓ 入选</span>` : `<span class="selmark off">筛选排除</span>`}</td>
     </tr>`;
@@ -492,7 +513,7 @@ function renderBudget(v) {
   meter.innerHTML = kept.map(c =>
     `<i style="width:${pct(c)}%;background:${typeColor(c.type)}" title="${esc(c.name)} (${c.tokens}t)"></i>`).join("");
   tick.textContent = `已选 ${kept.length}/${sorted.length} 项入选候选 · 共 ${used.toLocaleString()} tokens · 预算 ${n.toLocaleString()} · 剩余 ${Math.max(0, n - used).toLocaleString()}t`;
-  const trimmed = candidates.filter(c => c.rrf >= SEL_THRESHOLD && !kept.includes(c));
+  const trimmed = candidates.filter(c => (c.score >= SEL_THRESHOLD && c.rerank <= TOPN) && !kept.includes(c));
   const note = trimmed.length ? `（预算不足，裁剪：${trimmed.map(c => c.name.split("（")[0]).join("、")}）` : "";
   if (kept.length === 0) {
     msg.innerHTML = `<div class="callout warn"><b>预算过小，最小上下文退化为空。</b>正确做法是降级注入（摘要/骨架）而不是硬塞——这正是任务二的关键权衡。</div>`;
@@ -510,9 +531,9 @@ const chainDef = [
   { key: "recalled",    name: "recalled",     state: "✅ 已具备", color: "var(--good)",
     detail: "asset_recalled = 资产进入候选集合。v2 现状：L1 召回 + recall_hit_count 指标完整，CodeBuddy 真实会话已召回 8 条原子记忆。",
     ev: "证据 = recall_hit_count / top_score / 召回条目 id 列表" },
-  { key: "selected",    name: "selected",     state: "⚠️ 无记录", color: "var(--warning)",
-    detail: "asset_selected = 资产通过任务相关性筛选（RRF ≥ 0.60）。v2 现状：有阈值但**不记录**「选了谁 / 为什么 / 排除了谁」。演示面板一以「✓ 入选 / 筛选排除」展示了该环节。",
-    ev: "目标 = selection_event{chosen, rejected, reason, threshold, rerank_weights}" },
+  { key: "selected",    name: "selected",     state: "✅ 已具备", color: "var(--good)",
+    detail: "asset_selected = 资产内容经决策进入决策面。任务二已落地重排入选：六维加权总分 ≥ 阈值 且 名次 ≤ topN 的候选落 selected(decision=\"rerank\")，evidence 带六维分 + 预算裁剪标记（trimmedByBudget）；定向读取（get-by-name）落 selected(decision=\"direct-read\")。两者用 decision 区分。",
+    ev: "证据 = selected{decision:\"rerank\", rerank:{weightedScore, dims[6], passed, trimmedByBudget, rank, threshold}}" },
   { key: "injected",    name: "injected",     state: "✅ 已具备", color: "var(--good)",
     detail: "asset_injected = 资产进入 Agent 上下文。v2 现状：注入管线 + observer 记录 blockCount；CodeBuddy 会话三块注入 ✓。预算裁剪后的「最小充分集」即注入内容。",
     ev: "证据 = HookResult{blockCount, durationMs} + prompt_tokens 变化（90→4164）" },
@@ -722,7 +743,7 @@ function renderReceipt() {
     generated_from: "asset_event 表聚合（非 LLM 自述）",
     events: [
       { stage: "asset_recalled",  asset: "历史方案 NTFS→VSS", evidence: { recall_score: 0.91 } },
-      { stage: "asset_selected",  asset: "历史方案 NTFS→VSS", evidence: { rrf: 0.91, threshold: 0.60, rerank: ["相关性0.40×可信度0.15×历史效果0.15×…"] } },
+      { stage: "asset_selected",  asset: "历史方案 NTFS→VSS", evidence: { rrf: 0.91, threshold: 0.55, rerank: ["相关性0.40×可信度0.15×历史效果0.15×…"] } },
       { stage: "asset_injected",  asset: "历史方案 NTFS→VSS", evidence: { block: "ctx-2", tokens: 520 } },
       { stage: "asset_used",      asset: "历史方案 NTFS→VSS", evidence: { tool_call: "tdai_memory_search", decision: "触发 VSS 快照回滚路径" } },
       { stage: "asset_validated", asset: "历史方案 NTFS→VSS", evidence: { validator: "pytest", test: "test_acl_failover", passed: true } },
@@ -737,7 +758,7 @@ function setFilter(t) { activeFilter = t; renderReceipt(); }
 
 /* ---------- init ---------- */
 renderCandidates();
-renderBudget(4000);
+renderBudget(800);
 renderChain();
 renderReceipt();
 </script>

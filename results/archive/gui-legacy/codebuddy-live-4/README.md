@@ -1,7 +1,7 @@
 # 任务三/四 二轮新功能 · 走查留证（codebuddy-live-4）
 
 > 时间：2026-08-31 · 分支 v2.0.x · 本地 MemoryProxy(:8097) + MemoryCore(:8420) + 源码 Panel(:8125) + ClickHouse
-> 覆盖 `docs/verify-task34-round2.md` §3 Step 1–8 与 `docs/codebuddy-gui-walkthrough-checklist.md` 的**二轮新功能**。
+> 覆盖「任务三/四二轮新功能」的走查（现已并入本地未入库文档 `docs/codebuddy-gui-walkthrough.md`，仓库内不可见；本留证为当时子集）。
 > **脚本化走查会话 `sess-task34-r2-1788122297490`**（经与 CodeBuddy 完全相同的 OpenAI 协议打到 :8097，产出真实 DB 事件）。
 > **真实 CodeBuddy GUI 走查会话 `12045a6381084bf084740cea4a941e79`**（2026-08-31，模型 `deepseek-v4-flash` → proxy-memory-agent）。
 
