@@ -1,0 +1,92 @@
+[
+  {
+    "asset_id": "wiki-jzc2dysv",
+    "name": "批量迁移停机窗口评估",
+    "source": "team",
+    "weightedScore": 0.7472666666666667,
+    "rank": 1,
+    "passed": true,
+    "trimmedByBudget": false,
+    "threshold": 0.55,
+    "dims": {
+      "relevance": 1,
+      "credibility": 0.5,
+      "freshness": 0.5,
+      "envCompat": 0.5,
+      "historicalEffect": 0.5,
+      "tokenCost": 0.9726666666666667
+    }
+  },
+  {
+    "asset_id": "skl-qCbKMAmmkTJe",
+    "name": "cloud-migration-postmortems",
+    "source": "self",
+    "weightedScore": 0.7208527218079646,
+    "rank": 2,
+    "passed": true,
+    "trimmedByBudget": false,
+    "threshold": 0.55,
+    "dims": {
+      "relevance": 0.4025098769124917,
+      "credibility": 1,
+      "freshness": 0.9131543770963453,
+      "envCompat": 1,
+      "historicalEffect": 0.8333333333333334,
+      "tokenCost": 0.9353333333333333
+    }
+  },
+  {
+    "asset_id": "skl-4AbLsXJqNM6E",
+    "name": "cloud-migration-batch-planning",
+    "source": "self",
+    "weightedScore": 0.7144583414718214,
+    "rank": 3,
+    "passed": true,
+    "trimmedByBudget": false,
+    "threshold": 0.55,
+    "dims": {
+      "relevance": 0.6449157380117159,
+      "credibility": 0.5,
+      "freshness": 0.9132954626713502,
+      "envCompat": 1,
+      "historicalEffect": 0.64375,
+      "tokenCost": 0.9359999999999999
+    }
+  },
+  {
+    "asset_id": "skl-6Xgq7P22VjxO",
+    "name": "cloud-migration-tool-guide",
+    "source": "self",
+    "weightedScore": 0.7093319214278061,
+    "rank": 4,
+    "passed": true,
+    "trimmedByBudget": false,
+    "threshold": 0.55,
+    "dims": {
+      "relevance": 0.6732786643195945,
+      "credibility": 0.5,
+      "freshness": 0.9132954660905919,
+      "envCompat": 1,
+      "historicalEffect": 0.5272727272727273,
+      "tokenCost": 0.946
+    }
+  },
+  {
+    "asset_id": "skl-8yYETDkrSndn",
+    "name": "memory-hub-asset-guide",
+    "source": "self",
+    "weightedScore": 0.6938052973014327,
+    "rank": 5,
+    "passed": true,
+    "trimmedByBudget": false,
+    "threshold": 0.55,
+    "dims": {
+      "relevance": 0.5778997143638989,
+      "credibility": 0.5,
+      "freshness": 0.9031207822253973,
+      "envCompat": 1,
+      "historicalEffect": 0.6799999999999999,
+      "tokenCost": 0.9533333333333334
+    }
+  }
+]

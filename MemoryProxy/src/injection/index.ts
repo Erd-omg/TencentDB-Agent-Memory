@@ -77,6 +77,7 @@ export { TdaiL1RecallInjector } from "./injectors/tdai-l1-recall-injector.js";
 export { TdaiProfileMemoryInjector } from "./injectors/tdai-profile-memory-injector.js";
 export { TdaiToolsInjector } from "./injectors/tdai-tools-injector.js";
 export { KnowledgeToolsInjector } from "./injectors/knowledge-tools-injector.js";
+export { Task2SelectedAssetsInjector } from "./injectors/task2-selected-assets-injector.js";
 export { AssetReflectionInjector, renderAssetReflectionBlock } from "./injectors/asset-reflection-injector.js";
 
 // CodeBuddy
@@ -111,6 +112,7 @@ import { SkillToolsInjector } from "./injectors/skill-tools-injector.js";
 import { TdaiProfileMemoryInjector } from "./injectors/tdai-profile-memory-injector.js";
 import { TdaiToolsInjector } from "./injectors/tdai-tools-injector.js";
 import { KnowledgeToolsInjector } from "./injectors/knowledge-tools-injector.js";
+import { Task2SelectedAssetsInjector } from "./injectors/task2-selected-assets-injector.js";
 import { AssetReflectionInjector } from "./injectors/asset-reflection-injector.js";
 import type { ProtocolAdapter } from "./adapters/interface.js";
 import type { AgentProfile } from "./agents/interface.js";
@@ -312,6 +314,17 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
     registry.register(new SkillToolsInjector({ proxyBaseUrl: proxyBaseUrl!, allowLlmWrite }));
   }
 
+  // 任务二：面向新任务的检索与最小上下文（可选，config.retrieval.enabled）。
+  // 主动检索团队资产 → 六维重排 → 预算裁剪 → 注入 <task2_selected_assets>。
+  // 依赖 coreSkill（检索）与 skill-bridge 的白名单复用；不依赖 skill injector。
+  if (injectors.includes("task2-retrieval") && config.retrieval?.enabled) {
+    registry.register(new Task2SelectedAssetsInjector({
+      coreSkill: config.coreSkill,
+      retrieval: config.retrieval,
+    }));
+    console.log("[injection] task2-selected-assets-injector registered (retrieval.enabled)");
+  }
+
   if (injectors.includes("knowledge")) {
     // Knowledge tools injector — fetches team knowledge from kernel and
     // renders <knowledge_tools> prompt block with two-step self-discovery flow.
@@ -449,6 +462,7 @@ function getOrBuildBundle(config: ProxyConfig): PipelineBundle {
     coreSkill: config.coreSkill,
     knowledge: config.knowledge,
     server: config.server,
+    retrieval: config.retrieval, // 任务二：改阈值/权重/预算须重建 bundle
   });
   if (cachedBundle && cachedConfigHash === configHash) {
     return cachedBundle;

@@ -684,7 +684,22 @@ memCommand:
   allowedCommands: []              # 命令白名单；空数组 = 全部允许
                                    # 示例: ["sync", "help"] — 只允许这两个命令
                                    # 可选值: sync | create-skill | create-task | update-task
-                                   #         session-reset | validate | receipt | correct | help
+                                   #         session-reset | validate | receipt | correct | finalize | help
+
+# ── 任务结束 git-diff 关联（mem:finalize）───────────────────────────────────
+# 真实 bug-fix 任务收尾：抓目标仓库 git diff + 跑真实测试命令（真实退出码），按 token
+# 相关度把 validated 归到本会话 used/selected 资产（evidence 带 code_diff/outcome）。
+# taskRepos 把 task_id → { 仓库路径, 测试命令 }；mem:finalize 无参数时按会话 task 查表。
+finalize:
+  enabled: false                   # 是否启用 mem:finalize（默认 false）
+  timeoutMs: 60000                 # 单仓库测试命令超时 ms
+  autoOnCompletion: false          # 任务收尾自动归因（随 auto-receipt fire-and-forget，默认关）
+  taskRepos:
+    # 示例：云主机迁移工具 v1（业务夹具仓库）
+    # task-covxoq8e1r:
+    #   repo: "/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1"
+    #   test: "node --test"
+    #   runnerLabel: "node --test"
 
 # ── 任务三 validated/corrected 验证器 ──────────────────────────────────────
 # 资产验证（mem:validate）：按资产类型把校验命令真实执行，exit 0 → validated、
@@ -697,6 +712,50 @@ validation:
   rules:                           # 资产类型 → 校验命令模板
     skill: "node {root}/scripts/validators/validate-skill-format.mjs --file {file}"
     # chat-memory: "node {root}/scripts/validators/validate-memory-format.mjs --file {file}"
+
+# ── 任务二：面向新任务的检索与最小上下文 ────────────────────────────────────
+# 主动检索团队资产 → 六维重排（相关性×可信度×新鲜度×环境兼容性×历史效果×Token成本）
+# → 预算裁剪 → 注入 <task2_selected_assets> 指针块（最小充分上下文），并把重排决策
+# 落 selected(decision="rerank") + injected 事件。需在 injection.injectors 加入
+# "task2-retrieval"。相关性维 = core /v3/skill/search score（当前 BM25，候选集内
+# min-max 归一化；RRF 融合为 core 后续项），selectedThreshold 只对归一化总分有意义。
+retrieval:
+  enabled: false                   # 是否启用任务二注入器（默认 false，保守）
+  rerank:
+    weights:                       # 六维权重（合计应=1.0）
+      relevance: 0.40
+      credibility: 0.15
+      freshness: 0.10
+      envCompat: 0.10
+      historicalEffect: 0.15
+      tokenCost: 0.10
+    selectedThreshold: 0.55        # 入选阈值（作用于归一化加权总分 ∈[0,1]）
+    topN: 5                        # 入选上限
+    candidateTopK: 20              # 主动检索拉取候选数（core top_k 上限 50）
+    budgetTokens: 800              # 注入块 token 预算（紧凑指针）
+    freshnessHalfLifeDays: 30      # 新鲜度半衰期（天）
+  router:
+    rules:                         # 任务分类关键词规则：TaskType → 逗号分隔关键词（中英）
+      bug_fix: "修复,bug,失败,报错,故障,error,fail,crash,告警,校验,异常,缺陷"
+      feature: "新增,开发,feature,implement,支持,实现,需求"
+      refactor: "重构,优化,refactor,cleanup,清理,简化"
+      review: "评审,review,检查,审阅,审查"
+      devops: "迁移,部署,devops,发布,升级,运维,配置"
+  refresh:                         # ⑦ mid-session refresh（会话中途重跑 execute）
+    minTurnsBetween: 2             # 两次 refresh 至少间隔轮数（防首轮误刷）
+    refreshEveryTurns: 8           # 超过此轮数无论话题是否变化都重跑（兜底捕获同类型漂移）
+  effect:                          # 历史效果/可信度聚合过滤（避免他人/过期待验证当高可信）
+    sameTeamOnly: true             # 只计同 team 的 validated/used/corrected（team 空旧行按同部署计入）
+    windowDays: 90                 # 只计最近 N 天内的效果事件
+  sources:                         # 多源候选池（任务二 #1：来源轴 × 六桶内容轴正交）
+    teamSkill:
+      enabled: true                # 团队 Skill（team-visible + agent 自有 A∪B 白名单），默认开
+    chatMemory:
+      enabled: false               # 绑定代理 L1（self+借调≤2，逐 ctx /v3/atomic/search），需显式开
+      perAgentLimit: 5             # 每 ctx 拉取上限
+    wiki:
+      enabled: false               # 已注册团队 wiki（KS /wiki/search 正文检索）；需先起 MemoryKnowledge
+      perWikiLimit: 3
 
 # ── CC 请求分流 ────────────────────────────────────────────────────────────
 # 识别 CC 客户端（Claude Code CLI）后台自发的辅助请求，走差异化处理路径：

@@ -20,6 +20,7 @@ import { executeSessionReset } from "./commands/session-reset.js";
 import { executeValidate } from "./commands/validate.js";
 import { executeReceipt } from "./commands/receipt.js";
 import { executeCorrect } from "./commands/correct.js";
+import { executeFinalize } from "./commands/finalize.js";
 
 export { parseMemCommand, parseCommandFromText, type ParsedMemCommand } from "./parser.js";
 export { buildMemResponse } from "./response-builder.js";
@@ -37,6 +38,7 @@ const KNOWN_COMMANDS = new Set([
   "validate",
   "receipt",
   "correct",
+  "finalize",
   "help",
 ]);
 
@@ -88,6 +90,8 @@ export async function executeMemCommand(
       return executeReceipt(ctx);
     case "correct":
       return executeCorrect(ctx);
+    case "finalize":
+      return executeFinalize(ctx);
     case "session-reset":
       return executeSessionReset(ctx);
     default: {

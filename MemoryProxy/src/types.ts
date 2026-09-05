@@ -515,6 +515,12 @@ export interface ProxyConfig {
   /** 任务三 validated/corrected 验证器配置（mem:validate）。可选，缺省关闭。 */
   validation?: ValidationConfig;
 
+  /** 任务结束 git-diff 关联（mem:finalize / 任务收尾自动归因）。可选，缺省关闭。 */
+  finalize?: FinalizeConfig;
+
+  /** 任务二「面向新任务的检索与最小上下文」配置。可选，缺省关闭。 */
+  retrieval?: RetrievalConfig;
+
   /**
    * CC 请求分流总开关。
    *
@@ -595,6 +601,125 @@ export interface ValidationConfig {
    * 流式 fire-and-forget。缺省随 validation.enabled 开启。
    */
   autoValidateOnCompletion?: boolean;
+}
+
+/**
+ * 任务结束 git-diff 关联（`mem:finalize`）—— 把一次真实代码修改 + 真实测试结果
+ * 归因到本会话使用过的资产，补齐 asset → change → outcome（赛题任务三 C）。
+ *
+ * validated 证据 = 目标仓库真实 `git diff HEAD` + 真实测试命令退出码（非标签）；
+ * 归因 = token 相关度（本次代码 diff 与资产 name/desc 的共现）。
+ */
+export interface FinalizeTaskRepo {
+  /** 目标仓库绝对路径（独立 git 仓库，如云主机迁移工具 v1 夹具）。 */
+  repo: string;
+  /** 在该仓库 cwd 下运行的测试命令（如 "node --test"）。 */
+  test: string;
+  /** 证据里 test_result.runner 标签（缺省用 test 命令）。 */
+  runnerLabel?: string;
+}
+
+export interface FinalizeConfig {
+  /** 是否启用 mem:finalize。默认 false。 */
+  enabled: boolean;
+  /** 命令执行超时 ms。默认 60000（单测套件可能比格式校验慢）。 */
+  timeoutMs?: number;
+  /**
+   * 任务收尾自动 finalize（与 auto-receipt 联动，默认关）：
+   * shouldAutoAppendReceipt 触发且本会话 task_id 有 taskRepos 映射时，
+   * fire-and-forget 跑一次 git-diff + 真测试归因（不 await、不阻塞）。
+   */
+  autoOnCompletion?: boolean;
+  /** task_id → 目标仓库映射（mem:finalize 无参数时按会话 task 查表）。 */
+  taskRepos: Record<string, FinalizeTaskRepo>;
+}
+
+/**
+ * 任务二「面向新任务的检索与最小上下文」配置。
+ *
+ * 驱动 `Task2SelectedAssetsInjector`：session_init 主动检索团队资产 →
+ * 六维重排（相关性×可信度×新鲜度×环境兼容性×历史效果×Token成本）→
+ * 预算裁剪 → 注入 `<task2_selected_assets>` 最小充分上下文，并把重排决策
+ * 落 `selected(decision="rerank")` + `injected` 事件。
+ */
+export interface RetrievalConfig {
+  /** 是否启用任务二注入器。默认 false（同 knowledge，保守）。 */
+  enabled: boolean;
+  rerank: {
+    /**
+     * 六维权重（合计应=1.0）。对齐演示原型默认值：
+     * 相关性 0.40 / 可信度 0.15 / 历史效果 0.15 / 新鲜度 0.10 /
+     * 环境兼容性 0.10 / Token 成本 0.10。
+     */
+    weights: {
+      relevance: number;
+      credibility: number;
+      freshness: number;
+      envCompat: number;
+      historicalEffect: number;
+      tokenCost: number;
+    };
+    /**
+     * 入选判定阈值（作用于归一化后的加权总分 ∈[0,1]）。
+     * 注意：core search score 当前是 `-bm25`（无界），相关性维在候选集内
+     * min-max 归一化后才参与加权，因此该阈值只对归一化总分有意义。
+     */
+    selectedThreshold: number;
+    /** 入选上限（先按加权总分降序定 rank，`rank <= topN` 才可能入选）。 */
+    topN: number;
+    /** 主动检索拉取多少候选（core /v3/skill/search top_k 上限 50）。 */
+    candidateTopK: number;
+    /** 注入块 token 预算（紧凑指针：约 100–200 tokens/条）。 */
+    budgetTokens: number;
+    /** 新鲜度半衰期（天）。缺 updated_at 时新鲜度=0.5。 */
+    freshnessHalfLifeDays: number;
+  };
+  router: {
+    /** 任务分类关键词规则：TaskType → 逗号分隔关键词（中英）。 */
+    rules: Record<string, string>;
+  };
+  /**
+   * 历史效果/可信度维度的聚合过滤（任务二：#3「避免他人/过期待验证事件被当高可信」）。
+   * 只影响 rerank 读 asset_event 历史时怎么收敛，不是准入开关。
+   *   - sameTeamOnly：只计同 team 的 validated/used/corrected 事件（跨 team 信号不计入；
+   *     team_id 为空的旧行按同部署计入，不丢历史）。
+   *   - windowDays：只计最近 N 天内的效果事件（过期信号按新鲜度自然衰减之外再排除）。
+   * 缺省 sameTeamOnly=true、windowDays=90。
+   */
+  effect?: {
+    sameTeamOnly?: boolean;
+    windowDays?: number;
+  };
+  /**
+   * 多源候选池（任务二 #1：从"仅 skill"扩展到 chat-memory / wiki 等）。
+   * 缺省（未配置）：只开 team-skill（与 v2 现状一致，保守）。
+   */
+  sources?: {
+    teamSkill?: { enabled?: boolean };
+    chatMemory?: {
+      /** 是否把绑定代理的 L1（self+借调）纳入候选池。 */
+      enabled?: boolean;
+      /** 每 ctx /v3/atomic/search 拉取上限。默认 5。 */
+      perAgentLimit?: number;
+    };
+    wiki?: {
+      /** 是否把已注册团队 wiki（KS 正文检索）纳入候选池。 */
+      enabled?: boolean;
+      /** 每 wiki /wiki/search 拉取上限。默认 3。 */
+      perWikiLimit?: number;
+    };
+  };
+  /**
+   * 会话中途重排（⑦ mid-session refresh）。可选。
+   * session_init 缓存命中时，注入器每轮用 `shouldRefreshCache` 判断是否
+   * 需要按最新用户消息重跑 execute()（任务分类变化 / 超过轮数）。
+   */
+  refresh?: {
+    /** 两次 refresh 之间至少间隔的轮数（防首轮误刷，让 prewarm 任务块先发言）。默认 2。 */
+    minTurnsBetween: number;
+    /** 超过此轮数无论话题是否变化都重跑 execute()（兜底捕获同类型漂移）。默认 8。 */
+    refreshEveryTurns: number;
+  };
 }
 
 /** Context injection configuration. */
@@ -932,6 +1057,21 @@ export interface RawYamlConfig {
     enabled?: unknown;
     timeoutMs?: unknown;
     rules?: Record<string, unknown>;
+  };
+  /** 任务二 检索/重排配置（与 ProxyConfig.retrieval 对应）。 */
+  retrieval?: {
+    enabled?: unknown;
+    rerank?: {
+      weights?: Partial<Record<string, unknown>>;
+      selectedThreshold?: unknown;
+      topN?: unknown;
+      candidateTopK?: unknown;
+      budgetTokens?: unknown;
+      freshnessHalfLifeDays?: unknown;
+    };
+    router?: {
+      rules?: Record<string, unknown>;
+    };
   };
 }
 

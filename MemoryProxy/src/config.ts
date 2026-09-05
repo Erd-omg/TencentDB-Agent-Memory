@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { load as yamlLoad } from "js-yaml";
-import type { CostGuardConfig, ProxyConfig, RawYamlConfig } from "./types.js";
+import type { CostGuardConfig, FinalizeConfig, FinalizeTaskRepo, ProxyConfig, RawYamlConfig, RetrievalConfig } from "./types.js";
 
 const DEFAULT_UPSTREAM = "https://llm-upstream.example.com/v2/chat/completions";
 
@@ -146,6 +146,50 @@ export const DEFAULT_CONFIG: ProxyConfig = {
   memCommand: { enabled: false, allowedCommands: [] },
   ccRequestRouting: { enabled: true },
   workbuddyRequestRouting: { enabled: true },
+  // 任务二 检索/重排默认（仅当 yaml 配 retrieval 时启用；字段级缺省回退到此处）。
+  retrieval: {
+    enabled: false,
+    rerank: {
+      weights: {
+        relevance: 0.40,
+        credibility: 0.15,
+        freshness: 0.10,
+        envCompat: 0.10,
+        historicalEffect: 0.15,
+        tokenCost: 0.10,
+      },
+      selectedThreshold: 0.55,
+      topN: 5,
+      candidateTopK: 20,
+      budgetTokens: 800,
+      freshnessHalfLifeDays: 30,
+    },
+    router: {
+      rules: {
+        bug_fix: "修复,bug,失败,报错,故障,error,fail,crash,告警,校验,异常,缺陷",
+        feature: "新增,开发,feature,implement,支持,实现,需求",
+        refactor: "重构,优化,refactor,cleanup,清理,简化",
+        review: "评审,review,检查,审阅,审查",
+        devops: "迁移,部署,devops,发布,升级,运维,配置",
+      },
+    },
+    // ⑦ mid-session refresh 默认（会话中途话题漂移 / 到轮数重跑 execute）。
+    refresh: {
+      minTurnsBetween: 2,
+      refreshEveryTurns: 8,
+    },
+    // 历史效果/可信度聚合过滤（同 team + 时间窗；避免他人/过期待验证当高可信）。
+    effect: {
+      sameTeamOnly: true,
+      windowDays: 90,
+    },
+    // 多源候选池：缺省只开 team-skill（与现状等价，保守）；chat-memory/wiki 需显式开。
+    sources: {
+      teamSkill: { enabled: true },
+      chatMemory: { enabled: false, perAgentLimit: 5 },
+      wiki: { enabled: false, perWikiLimit: 3 },
+    },
+  },
 };
 
 /** Load and parse a YAML config file. Returns empty object on missing file. */
@@ -266,6 +310,8 @@ function parseUpstreamAgents(
 export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
   const configPath = overrides.configFile || "config.yaml";
   const yaml = loadYamlConfig(configPath);
+  const retrievalConfig = parseRetrievalConfig(yaml);
+  const finalizeConfig = parseFinalizeConfig(yaml);
 
   return {
     server: {
@@ -558,6 +604,11 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
           },
         }
       : {}),
+    // 任务结束 git-diff 关联（mem:finalize）。可选段——未配置则不启用。
+    ...(finalizeConfig ? { finalize: finalizeConfig } : {}),
+    // 任务二 检索/重排：仅当 yaml 配置了 `retrieval:` 段才出现在结果里
+    // （缺省走 parseRetrievalConfig 返回 undefined → 注入器不注册，保守）。
+    ...(retrievalConfig ? { retrieval: retrievalConfig } : {}),
     ccRequestRouting: {
       enabled:
         (yaml as { ccRequestRouting?: { enabled?: boolean } }).ccRequestRouting?.enabled
@@ -566,6 +617,123 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       enabled:
         (yaml as { workbuddyRequestRouting?: { enabled?: boolean } }).workbuddyRequestRouting?.enabled
         ?? DEFAULT_CONFIG.workbuddyRequestRouting.enabled,
+    },
+  };
+}
+
+/**
+ * 解析 `finalize:` YAML 段 → FinalizeConfig。未配置返回 undefined（mem:finalize 禁用）。
+ * taskRepos 只保留 repo+test 齐全的映射（非法的丢弃）。
+ */
+function parseFinalizeConfig(yaml: RawYamlConfig): FinalizeConfig | undefined {
+  const raw = (yaml as { finalize?: unknown }).finalize;
+  if (!raw || typeof raw !== "object") return undefined;
+  const f = raw as { enabled?: unknown; timeoutMs?: unknown; autoOnCompletion?: unknown; taskRepos?: unknown };
+  const taskRepos: Record<string, FinalizeTaskRepo> = {};
+  if (f.taskRepos && typeof f.taskRepos === "object") {
+    for (const [taskId, v] of Object.entries(f.taskRepos as Record<string, unknown>)) {
+      const r = v as { repo?: unknown; test?: unknown; runnerLabel?: unknown } | null | undefined;
+      if (!r || typeof r !== "object") continue;
+      if (typeof r.repo !== "string" || !r.repo || typeof r.test !== "string" || !r.test) continue;
+      taskRepos[taskId] = {
+        repo: r.repo,
+        test: r.test,
+        ...(typeof r.runnerLabel === "string" && r.runnerLabel ? { runnerLabel: r.runnerLabel } : {}),
+      };
+    }
+  }
+  return {
+    enabled: Boolean(f.enabled),
+    timeoutMs: typeof f.timeoutMs === "number" ? f.timeoutMs : 60_000,
+    autoOnCompletion: typeof f.autoOnCompletion === "boolean" ? f.autoOnCompletion : undefined,
+    taskRepos,
+  };
+}
+
+/**
+ * 解析 `retrieval:` YAML 段 → RetrievalConfig。未配置返回 undefined。
+ * 字段级缺省回退 DEFAULT_CONFIG.retrieval（类型上 retrieval 是可选字段，
+ * DEFAULT_CONFIG literal 里已给默认值，用 `!` 断言）。
+ */
+function parseRetrievalConfig(yaml: RawYamlConfig): RetrievalConfig | undefined {
+  const raw = yaml.retrieval;
+  if (!raw) return undefined;
+  const def = DEFAULT_CONFIG.retrieval!;
+  const wRaw = (raw.rerank?.weights ?? {}) as Record<string, unknown>;
+  const num = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);
+  return {
+    enabled: Boolean(raw.enabled),
+    rerank: {
+      weights: {
+        relevance: num(wRaw.relevance, def.rerank.weights.relevance),
+        credibility: num(wRaw.credibility, def.rerank.weights.credibility),
+        freshness: num(wRaw.freshness, def.rerank.weights.freshness),
+        envCompat: num(wRaw.envCompat, def.rerank.weights.envCompat),
+        historicalEffect: num(wRaw.historicalEffect, def.rerank.weights.historicalEffect),
+        tokenCost: num(wRaw.tokenCost, def.rerank.weights.tokenCost),
+      },
+      selectedThreshold: num(raw.rerank?.selectedThreshold, def.rerank.selectedThreshold),
+      topN: num(raw.rerank?.topN, def.rerank.topN),
+      candidateTopK: num(raw.rerank?.candidateTopK, def.rerank.candidateTopK),
+      budgetTokens: num(raw.rerank?.budgetTokens, def.rerank.budgetTokens),
+      freshnessHalfLifeDays: num(raw.rerank?.freshnessHalfLifeDays, def.rerank.freshnessHalfLifeDays),
+    },
+    router: {
+      rules:
+        raw.router?.rules && typeof raw.router.rules === "object"
+          ? (Object.fromEntries(
+              Object.entries(raw.router.rules as Record<string, unknown>)
+                .filter(([, v]) => typeof v === "string"),
+            ) as Record<string, string>)
+          : def.router.rules,
+    },
+    refresh: {
+      // yaml 推断不含 refresh（同 router 姿势），cast 读取。
+      minTurnsBetween: num(
+        (raw as { refresh?: { minTurnsBetween?: unknown } }).refresh?.minTurnsBetween,
+        def.refresh!.minTurnsBetween,
+      ),
+      refreshEveryTurns: num(
+        (raw as { refresh?: { refreshEveryTurns?: unknown } }).refresh?.refreshEveryTurns,
+        def.refresh!.refreshEveryTurns,
+      ),
+    },
+    effect: {
+      // 历史效果/可信度聚合过滤（同 team + 时间窗），cast 读取，缺省回退 DEFAULT。
+      sameTeamOnly:
+        typeof (raw as { effect?: { sameTeamOnly?: unknown } }).effect?.sameTeamOnly === "boolean"
+          ? (raw as { effect: { sameTeamOnly: boolean } }).effect.sameTeamOnly
+          : (def.effect?.sameTeamOnly ?? true),
+      windowDays: num(
+        (raw as { effect?: { windowDays?: unknown } }).effect?.windowDays,
+        def.effect?.windowDays ?? 90,
+      ),
+    },
+    sources: {
+      // 多源候选池（缺省只开 team-skill）。cast 读取（yaml 推断不含 sources）。
+      teamSkill: {
+        enabled: typeof (raw as { sources?: { teamSkill?: { enabled?: unknown } } }).sources?.teamSkill?.enabled === "boolean"
+          ? (raw as { sources: { teamSkill: { enabled: boolean } } }).sources.teamSkill.enabled
+          : (def.sources?.teamSkill?.enabled ?? true),
+      },
+      chatMemory: {
+        enabled: typeof (raw as { sources?: { chatMemory?: { enabled?: unknown } } }).sources?.chatMemory?.enabled === "boolean"
+          ? (raw as { sources: { chatMemory: { enabled: boolean } } }).sources.chatMemory.enabled
+          : (def.sources?.chatMemory?.enabled ?? false),
+        perAgentLimit: num(
+          (raw as { sources?: { chatMemory?: { perAgentLimit?: unknown } } }).sources?.chatMemory?.perAgentLimit,
+          def.sources?.chatMemory?.perAgentLimit ?? 5,
+        ),
+      },
+      wiki: {
+        enabled: typeof (raw as { sources?: { wiki?: { enabled?: unknown } } }).sources?.wiki?.enabled === "boolean"
+          ? (raw as { sources: { wiki: { enabled: boolean } } }).sources.wiki.enabled
+          : (def.sources?.wiki?.enabled ?? false),
+        perWikiLimit: num(
+          (raw as { sources?: { wiki?: { perWikiLimit?: unknown } } }).sources?.wiki?.perWikiLimit,
+          def.sources?.wiki?.perWikiLimit ?? 3,
+        ),
+      },
     },
   };
 }

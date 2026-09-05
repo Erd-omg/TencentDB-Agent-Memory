@@ -1,0 +1,47 @@
+exit=0
+TAP version 13
+# Subtest: ACL 应用必须晚于 VSS 快照（快照先于数据变更）
+ok 1 - ACL 应用必须晚于 VSS 快照（快照先于数据变更）
+  ---
+  duration_ms: 0.441667
+  type: 'test'
+  ...
+# Subtest: 正常迁移：复制完成、ACL 应用、状态到 done
+ok 2 - 正常迁移：复制完成、ACL 应用、状态到 done
+  ---
+  duration_ms: 0.818
+  type: 'test'
+  ...
+# Subtest: 缺目标标识：precheck 抛错、不产生任何步骤
+ok 3 - 缺目标标识：precheck 抛错、不产生任何步骤
+  ---
+  duration_ms: 0.238875
+  type: 'test'
+  ...
+# Subtest: 校验门：缺失字段判定不可执行
+ok 4 - 校验门：缺失字段判定不可执行
+  ---
+  duration_ms: 0.779167
+  type: 'test'
+  ...
+# Subtest: 构建计划：小停机窗口给告警，不阻断
+ok 5 - 构建计划：小停机窗口给告警，不阻断
+  ---
+  duration_ms: 0.094042
+  type: 'test'
+  ...
+# Subtest: verify 失败 → 回滚恢复到迁移前基线（ACL 不残留）
+ok 6 - verify 失败 → 回滚恢复到迁移前基线（ACL 不残留）
+  ---
+  duration_ms: 0.95825
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54.369417

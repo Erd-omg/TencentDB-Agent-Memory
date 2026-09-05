@@ -7,8 +7,9 @@
  * 数据全部来自 asset_event 事件表 —— 不是 LLM 自述，可回溯、可核查。
  *
  * 用法：
- *   mem:receipt                 → 完整回执（Markdown，reference_only 折叠）
- *   mem:receipt --full          → 展开全部资产卡（含仅背景参考）
+ *   mem:receipt                 → 完整回执（Markdown）：开头「本次任务相关资产」叙事段
+ *                                 （推荐/使用/验证一句话）+ 去重计数 + reference_only 折叠
+ *   mem:receipt --full          → 展开全部资产卡（含仅背景参考）+ 事件计数 + 会话信号
  *   mem:receipt --json          → 输出结构化 JSON（脚本 / CLI 消费）
  *   mem:receipt <assetId>       → 单资产深潜（列出该资产全部证据事件）
  *
@@ -107,7 +108,20 @@ function latestEventFor(assetId: string, events: AssetEvent[]): AssetEvent | und
 function evidenceExcerpt(e: AssetEvent | undefined): string | undefined {
   const ev = e?.evidence;
   if (ev?.test_result) {
-    return `[${ev.test_result.runner}] exit=${ev.test_result.exitCode} ${(ev.test_result.output ?? "").slice(0, 80)}`;
+    // validated/corrected：真测试退出码。finalize 事件带 outcome/code_diff → 单独展示；
+    // 纯校验器事件（无 outcome）回退展示单行输出摘要（如 PASS/FAIL），避免 TAP 整屏刷卡。
+    let s = `[${ev.test_result.runner}] exit=${ev.test_result.exitCode}`;
+    if (ev.outcome) {
+      s += `\n  结果: ${ev.outcome}`;
+    } else if (ev.test_result.output) {
+      const flat = ev.test_result.output.split(/\n+/).map((x) => x.trim()).filter(Boolean).join(" · ");
+      if (flat) s += ` ${flat.slice(0, 120)}`;
+    }
+    if (ev.code_diff) {
+      const first = ev.code_diff.split("\n").find((l) => l.trim());
+      if (first) s += `\n  diff: ${first.trim().slice(0, 120)}`;
+    }
+    return s;
   }
   if (ev?.tool_call) {
     let s = `${ev.tool_call.bridge}/${ev.tool_call.endpoint}${ev.tool_call.query ? ` · query="${ev.tool_call.query.slice(0, 40)}"` : ""}`;
@@ -117,6 +131,50 @@ function evidenceExcerpt(e: AssetEvent | undefined): string | undefined {
     return s;
   }
   return undefined;
+}
+
+/** 按资产去重：各阶段触及的 distinct 资产数（回执默认展示，避免"注入165"这类事件计数观感）。 */
+function distinctStageCounts(assets: ReceiptAsset[]): Record<AssetEventStage, number> {
+  const out = {} as Record<AssetEventStage, number>;
+  for (const a of assets) {
+    for (const s of a.stages) out[s] = (out[s] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** 叙事段用：一张资产的一句话人话。优先 corrected/validated 证据（结果信号最强），再 used；否则给推荐/读取口径。 */
+function highlightWhyFor(asset: ReceiptAsset, events: AssetEvent[]): string {
+  const mine = events.filter((e) => e.asset.assetId === asset.asset_id);
+  const sorted = [...mine].sort((a, b) => b.createdAt - a.createdAt);
+  // 结果信号最强：corrected / validated（有 test_result）。
+  for (const e of sorted) {
+    if (e.stage === "corrected" || e.stage === "validated") {
+      const ex = evidenceExcerpt(e);
+      if (ex) return ex;
+    }
+  }
+  // 行为信号：used（tool_call）。
+  for (const e of sorted) {
+    if (e.stage === "used") {
+      const ex = evidenceExcerpt(e);
+      if (ex) return ex;
+    }
+  }
+  // 任务二六维重排推荐（selected decision="rerank"）：给归一化加权分 + 来源。
+  const rerank = sorted
+    .find((e) => e.stage === "selected" && e.evidence?.decision === "rerank")
+    ?.evidence?.rerank;
+  if (rerank) {
+    const src = asset.source && asset.source !== "self" ? ` · 来源 ${asset.source}` : "";
+    return `六维重排入选 · 加权${rerank.weightedScore.toFixed(2)}${src}`;
+  }
+  // 定向读取（selected decision="direct-read"）。
+  const direct = sorted.find((e) => e.stage === "selected" && e.evidence?.tool_call);
+  if (direct?.evidence?.tool_call) {
+    const tc = direct.evidence.tool_call;
+    return `已定向读取 · ${tc.bridge}/${tc.endpoint}`;
+  }
+  return "";
 }
 
 /** 单张资产卡（Markdown）。showAllEvents=true 时列出该资产全部证据事件（深潜）。 */
@@ -145,16 +203,42 @@ function assetCardLines(asset: ReceiptAsset, events: AssetEvent[], showAllEvents
   return lines;
 }
 
-/** 渲染完整 Markdown 回执（default 折叠 reference_only，full 全展开）。 */
+/** 叙事段展示上限（Top N）。 */
+const NARRATIVE_TOP = 4;
+
+/**
+ * 渲染完整 Markdown 回执。
+ * @param full true=--full：展开 reference_only 卡片 + 事件计数 + 会话信号（技术细节）。
+ *              false=默认：折叠 reference_only、只显示去重计数、隐藏会话信号。
+ */
 function renderMarkdownReceipt(
   data: ReceiptData,
-  expandReference: boolean,
+  full: boolean,
   sigLine?: string,
   relWarning?: string,
 ): string {
   const lines: string[] = [];
   lines.push("## 📋 资产使用回执（本会话）");
   lines.push("");
+
+  // 叙事段：按有效性优先级取 Top N，一句人话（推荐/使用/验证），
+  // 让用户第一眼看到"这次任务系统推荐了什么、哪些真的用上了"，而非数字墙。
+  const highlighted = [...data.assets]
+    .filter((a) => a.effectiveness !== "reference_only")
+    .sort((a, b) => (EFFECTIVENESS_PRIORITY[a.effectiveness] ?? 99) - (EFFECTIVENESS_PRIORITY[b.effectiveness] ?? 99));
+  if (highlighted.length > 0) {
+    lines.push("**本次任务相关资产（按重要性）：**");
+    for (const a of highlighted.slice(0, NARRATIVE_TOP)) {
+      const meta = EFFECTIVENESS_META[a.effectiveness];
+      const type = TYPE_LABEL[a.asset_type] ?? a.asset_type;
+      const why = highlightWhyFor(a, data.events);
+      lines.push(`- ${meta.icon} [${type}] ${a.name || a.asset_id} — ${meta.label}${why ? ` · ${why}` : ""}`);
+    }
+    if (highlighted.length > NARRATIVE_TOP) {
+      lines.push(`- … 另有 ${highlighted.length - NARRATIVE_TOP} 项，完整明细见下方分组`);
+    }
+    lines.push("");
+  }
 
   // 汇总行
   const byType = new Map<string, number>();
@@ -164,11 +248,20 @@ function renderMarkdownReceipt(
   }
   const typeSummary = [...byType.entries()].map(([t, n]) => `${t} ${n}`).join(" · ");
   lines.push(`**应用资产：${data.assets.length} 项**（${typeSummary || "—"}）`);
+  // 默认按资产去重（injected 每轮缓存命中重打 → 事件计数虚高，见 evidence-observer）。
+  const distinct = distinctStageCounts(data.assets);
   const stageSummary = STAGE_ORDER
-    .filter((s) => data.stageCounts[s] > 0)
-    .map((s) => `${STAGE_LABEL[s]} ${data.stageCounts[s]}`)
+    .filter((s) => distinct[s] > 0)
+    .map((s) => `${STAGE_LABEL[s]} ${distinct[s]}`)
     .join(" · ");
-  lines.push(`**证据链计数：** ${stageSummary || "（暂无）"}`);
+  lines.push(`**证据链（按资产去重）：** ${stageSummary || "（暂无）"}`);
+  if (full) {
+    const rawSummary = STAGE_ORDER
+      .filter((s) => data.stageCounts[s] > 0)
+      .map((s) => `${STAGE_LABEL[s]} ${data.stageCounts[s]}`)
+      .join(" · ");
+    lines.push(`**证据链（事件计数）：** ${rawSummary || "（暂无）"}`);
+  }
   const eff = data.effectiveness;
   const effParts = [
     `✅已验证 ${eff.validated}`,
@@ -179,7 +272,8 @@ function renderMarkdownReceipt(
   effParts.push(`💤参考 ${eff.reference_only}`);
   if (eff.corrected > 0) effParts.push(`❌需修正 ${eff.corrected}`);
   lines.push(`**有效性：** ${effParts.join(" · ")}`);
-  if (sigLine) lines.push(sigLine);
+  // 会话信号（CH）是技术细节：默认隐藏，--full 展示。
+  if (full && sigLine) lines.push(sigLine);
   if (relWarning) lines.push(`⚠️ ${relWarning}`);
   lines.push("");
 
@@ -195,7 +289,7 @@ function renderMarkdownReceipt(
     const sorted = [...assets].sort(
       (a, b) => (EFFECTIVENESS_PRIORITY[a.effectiveness] ?? 99) - (EFFECTIVENESS_PRIORITY[b.effectiveness] ?? 99),
     );
-    const shown = sorted.filter((a) => expandReference || a.effectiveness !== "reference_only");
+    const shown = sorted.filter((a) => full || a.effectiveness !== "reference_only");
     const refCount = sorted.length - shown.length;
     lines.push(`## ${type}（${sorted.length}）`);
     for (const a of shown) lines.push(...assetCardLines(a, data.events));

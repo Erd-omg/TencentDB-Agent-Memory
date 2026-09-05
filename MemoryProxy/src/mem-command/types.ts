@@ -50,7 +50,8 @@ export type MemCommandName =
   | "update-task"
   | "validate"
   | "receipt"
-  | "correct";
+  | "correct"
+  | "finalize";
 
 export interface MemCommandResult {
   success: boolean;

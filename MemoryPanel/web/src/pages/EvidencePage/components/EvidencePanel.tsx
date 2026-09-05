@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from 'tea-component';
+import { useSearchParams } from 'react-router-dom';
 
 import {
   listEvidenceSessions,
@@ -44,12 +45,19 @@ function fmtTime(ts: number): string {
 
 export default function EvidencePanel() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
   const [sessions, setSessions] = useState<EvidenceSession[]>([]);
   const [selected, setSelected] = useState('');
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingReceipt, setLoadingReceipt] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ⑨ 深链预选：#/evidence?session=<session_key> → 打开即定位该会话（mem:receipt 输出）。
+  useEffect(() => {
+    const urlSession = searchParams.get('session');
+    if (urlSession) setSelected(urlSession);
+  }, [searchParams]);
 
   const loadSessions = useCallback(() => {
     setLoadingSessions(true);

@@ -1,0 +1,90 @@
+exit=1
+TAP version 13
+# Subtest: ACL 应用必须晚于 VSS 快照（快照先于数据变更）
+not ok 1 - ACL 应用必须晚于 VSS 快照（快照先于数据变更）
+  ---
+  duration_ms: 0.839625
+  type: 'test'
+  location: '/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1/tests/acl-snapshot-order.test.js:14:1'
+  failureType: 'testCodeFailure'
+  error: '步骤顺序错误：VSS 快照(#2) 必须先于 ACL(#1)；实际顺序 precheck → apply-acl → vss-snapshot → copy-data → verify → done'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///Users/erdomg/Desktop/Agent-Memory/migration-tool-v1/tests/acl-snapshot-order.test.js:29:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: 正常迁移：复制完成、ACL 应用、状态到 done
+ok 2 - 正常迁移：复制完成、ACL 应用、状态到 done
+  ---
+  duration_ms: 0.791458
+  type: 'test'
+  ...
+# Subtest: 缺目标标识：precheck 抛错、不产生任何步骤
+ok 3 - 缺目标标识：precheck 抛错、不产生任何步骤
+  ---
+  duration_ms: 0.181
+  type: 'test'
+  ...
+# Subtest: 校验门：缺失字段判定不可执行
+ok 4 - 校验门：缺失字段判定不可执行
+  ---
+  duration_ms: 0.993458
+  type: 'test'
+  ...
+# Subtest: 构建计划：小停机窗口给告警，不阻断
+ok 5 - 构建计划：小停机窗口给告警，不阻断
+  ---
+  duration_ms: 0.3625
+  type: 'test'
+  ...
+# Subtest: verify 失败 → 回滚恢复到迁移前基线（ACL 不残留）
+not ok 6 - verify 失败 → 回滚恢复到迁移前基线（ACL 不残留）
+  ---
+  duration_ms: 2.146875
+  type: 'test'
+  location: '/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1/tests/rollback.test.js:10:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    回滚后源端应等于迁移前基线，ACL 不应残留
+    + actual - expected
+    
+      {
+    +   acl: {
+    +     Everyone: 'read'
+    +   },
+    -   acl: undefined,
+        files: {}
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    files:
+  actual:
+    files:
+    acl:
+      Everyone: 'read'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/erdomg/Desktop/Agent-Memory/migration-tool-v1/tests/rollback.test.js:23:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 4
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55.171792

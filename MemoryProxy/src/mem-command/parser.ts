@@ -49,6 +49,8 @@ const MEM_COMMANDS_ARGS: Record<string, boolean> = {
   "receipt": true,
   // validate 支持 --all / <assetId>，接受可选 args。
   "validate": true,
+  // finalize 支持 --repo <abs> / --test <cmd>，接受可选 args。
+  "finalize": true,
 };
 
 /**

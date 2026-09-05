@@ -17,6 +17,7 @@ const HELP_TEXT = `## 支持的 mem: 命令
 | \`mem:receipt\` | 资产使用回执：本次会话用了哪些资产、走到哪个阶段、效果状态（来自证据链事件表） |
 | \`mem:validate [--all|资产id]\` | 真实校验资产（跑校验命令）：默认 used/selected，--all 全量；exit 0 → validated |
 | \`mem:correct <资产id> [原因]\` | 用户/评审主动纠正资产：落 corrected 事件（evidence.source=user） |
+| \`mem:finalize [--repo <路径>] [--test <命令>]\` | 任务结束 git-diff 关联：抓真实代码 diff + 跑真实测试 → 给相关资产写 validated（真退出码 + change/outcome） |
 | \`mem:help\` | 显示本帮助 |
 
 ---
@@ -69,6 +70,19 @@ exit 0 → 落 \`validated\` 事件；非 0 → 落 \`corrected\` 事件（资�
 
 ---
 
+### 🔗 \`mem:finalize\` — 任务结束 git-diff 关联（真代码 diff + 真测试 → validated）
+
+在真实 bug-fix 任务收尾运行：对目标仓库抓 **git diff** + 跑**真实测试命令**（真实退出码），
+把"本次代码修改通过测试"这一结果按 token 相关度归因到本会话 used/selected 资产，
+写 \`validated\` 事件（evidence 带 test_result + code_diff + outcome）—— 补齐
+\`asset → change → outcome\`。
+
+- 无参数：按会话 task_id 查 \`config.finalize.taskRepos\` 定位仓库。
+- \`mem:finalize --repo <abs路径> --test <命令>\`：显式指定（覆盖映射）。
+- 诚实边界：无代码变更 / 测试未通过 → 不写 validated（有变更但未过测试不宣称验证有效）。
+
+---
+
 ### 示例
 
 \`\`\`
@@ -84,6 +98,8 @@ mem:receipt
 mem:validate
 mem:validate skl-xxx
 mem:correct skl-xxx 命令过时，需要更新
+mem:finalize
+mem:finalize --repo /path/to/repo --test "node --test"
 mem:session-reset
 mem:help
 \`\`\`

@@ -93,6 +93,47 @@ describe("evaluateRisks", () => {
     expect(risks.map((r) => r.label)).not.toContain("低置信");
   });
 
+  it("重排入选（selected decision=rerank）用归一化加权分判低置信——加权≥阈值不标，即使召回分低", () => {
+    // migration-expert-tips 场景：core 原始 score（-bm25≈0）低，但六维归一化加权 0.59 入选。
+    const risks = evaluateRisks(summary(["recalled", "selected"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.0 } }),
+      evt("selected", {
+        evidence: {
+          decision: "rerank",
+          rerank: { weightedScore: 0.59, dims: { relevance: 0.5, credibility: 0.5, freshness: 0.5, envCompat: 0.5, historicalEffect: 0.5, tokenCost: 0.5 }, passed: true, trimmedByBudget: false, rank: 5, threshold: 0.55 },
+        },
+      }),
+    ]);
+    expect(risks.map((r) => r.label)).not.toContain("低置信");
+  });
+
+  it("重排入选但加权分仍低于阈值 → 标低置信（detail 标注口径为六维加权）", () => {
+    const risks = evaluateRisks(summary(["selected"]), [
+      evt("selected", {
+        evidence: {
+          decision: "rerank",
+          rerank: { weightedScore: 0.3, dims: { relevance: 0.3, credibility: 0.3, freshness: 0.3, envCompat: 0.3, historicalEffect: 0.3, tokenCost: 0.3 }, passed: false, trimmedByBudget: false, rank: 6, threshold: 0.55 },
+        },
+      }),
+    ]);
+    const low = risks.find((r) => r.label === "低置信");
+    expect(low).toBeDefined();
+    expect(low?.detail).toContain("六维加权最低 0.30");
+  });
+
+  it("无重排证据时回落召回原始 score（direct-read 场景不变）", () => {
+    // direct-read：bridge 搜索落 recalled（带原始 score），get-by-name 落 selected(decision=direct-read)。
+    const risks = evaluateRisks(summary(["recalled", "selected"]), [
+      evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.3 } }),
+      evt("selected", {
+        evidence: { decision: "direct-read", tool_call: { bridge: "skill-bridge", endpoint: "get-by-name", httpStatus: 200 } },
+      }),
+    ]);
+    const low = risks.find((r) => r.label === "低置信");
+    expect(low).toBeDefined();
+    expect(low?.detail).toContain("召回相关度最低 0.30");
+  });
+
   it("可能过期：对最新纠正时间比较——首次纠正后、末次纠正前使用不标过期", () => {
     // 两次纠正（t=200 / t=400），used 在 t=300（首次纠正后、末次纠正前）→ 不标过期。
     const risks = evaluateRisks(summary(["used", "corrected"]), [

@@ -1,0 +1,16 @@
+== proxy /v3/evidence/receipt (Panel 同源) session=4a79c410216342d384dd81b14b4a2a46 ==
+code 0
+asset_count 19
+stage_counts {'recalled': 17, 'selected': 8, 'injected': 55, 'used': 3, 'validated': 0, 'corrected': 0, 'contributed': 0}
+deep_link_assets_sample: ['memory-hub-asset-guide', 'cloud-migration-tool-guide', 'cloud-migration-batch-planning', 'cloud-migration-postmortems', 'migration-expert-tips', 'team-coding-standards']
+
+== Panel evidence API reachable ==
+panel sessions http=401
+
+── ⑨ Panel 深链诊断（用户反馈：CodeBuddy 内点链接无反应）──
+- 结论：链接与 Panel 预选本身正常 —— 用 CDP 开 #/evidence?session=<key> 已验证
+  (hash 含 session、19 资产卡展开)。无反应 = CodeBuddy CN webview 不处理外部 http
+  链接点击（应用限制，非回执代码问题）。
+- 解法：在 Chrome 里手开（Panel 需登录，user_key 见 deploy/global-images/.admin-key）：
+  http://127.0.0.1:8125/#/evidence?session=4a79c410216342d384dd81b14b4a2a46
+- Panel 证据 API 同源（proxy /v3/evidence/receipt）返回 code 0 / asset_count 19。

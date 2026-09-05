@@ -283,9 +283,20 @@ export class InjectionPipeline {
 
     if (strategy === "session_init") {
       const cached = await this.hookCacheRepo.get(spaceId, userId, agentSource, sessionId, hook.id);
-      if (cached !== null) {
+
+      // ⑦ mid-session refresh：缓存命中但钩子声明 stale（话题漂移 / 到轮数）→
+      // 视作 miss，重跑 execute() 并 self-heal 换新块。
+      const stale =
+        cached !== null
+        && typeof hook.shouldRefreshCache === "function"
+        && await hook.shouldRefreshCache(ctx, cached);
+
+      if (cached !== null && !stale) {
         console.log(`[hook-cache] session=${sessionId} hook=${hook.id} hit blocks=${cached.length}`);
         return cached;
+      }
+      if (cached !== null && stale) {
+        console.log(`[hook-cache] session=${sessionId} hook=${hook.id} stale → refresh`);
       }
 
       // Cache miss safety net. This is expected on the very first request of
@@ -313,6 +324,11 @@ export class InjectionPipeline {
         }
       } else if (readOnly) {
         console.log(`[hook-cache] session=${sessionId} hook=${hook.id} miss (readOnly, no self-heal) blocks=${fresh.length}`);
+      } else if (stale && cached !== null) {
+        // ⑦ refresh 触发但 execute() 返回空（弱信号 / 检索无命中）→ 保留旧缓存块，
+        // 避免把会话里已生效的推荐块冲成空。
+        console.log(`[hook-cache] session=${sessionId} hook=${hook.id} stale refresh returned empty → keep cached`);
+        return cached;
       } else {
         console.log(`[hook-cache] session=${sessionId} hook=${hook.id} miss + execute returned empty (no self-heal)`);
       }

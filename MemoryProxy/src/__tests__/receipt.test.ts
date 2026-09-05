@@ -89,8 +89,11 @@ describe("executeReceipt", () => {
     expect(r.success).toBe(true);
     expect(r.messageText).toContain("## 📋 资产使用回执（本会话）");
     expect(r.messageText).toContain("**应用资产：2 项**（Skill 1 · Chat-Memory 1）");
-    expect(r.messageText).toContain("**证据链计数：** 注入 2 · 使用 1 · 已验证 1");
+    expect(r.messageText).toContain("**证据链（按资产去重）：** 注入 2 · 使用 1 · 已验证 1");
     expect(r.messageText).toContain("**有效性：** ✅已验证 1");
+    // 叙事段：Top 资产一句话人话（推荐/使用/验证），reference_only 不出现。
+    expect(r.messageText).toContain("**本次任务相关资产（按重要性）：**");
+    expect(r.messageText).toMatch(/- ✅ \[Skill\] tool-guide — 已通过测试验证 · \[command\] exit=0 PASS/);
     // 类型分组标题
     expect(r.messageText).toContain("## Skill（1）");
     expect(r.messageText).toContain("## Chat-Memory（1）");
@@ -115,6 +118,42 @@ describe("executeReceipt", () => {
     expect(r.messageText).not.toContain("> 💤 仅背景参考");
   });
 
+  it("叙事段展示任务二推荐资产（六维加权分 + 跨 agent 来源）；injected 按资产去重", async () => {
+    const repo = getAssetEventRepo()!;
+    // 同一资产多轮 injected（缓存命中重打）→ 默认回执只按资产计 1。
+    for (let i = 0; i < 3; i++) {
+      repo.insert(repo.newEvent({
+        stage: "injected",
+        asset: { assetId: "skl-r", assetType: "skill", name: "migration-expert-tips", source: "agt-b" },
+        sessionKey: "codebuddy:conv-demo",
+      }));
+    }
+    repo.insert(repo.newEvent({
+      stage: "selected",
+      asset: { assetId: "skl-r", assetType: "skill", name: "migration-expert-tips", source: "agt-b" },
+      sessionKey: "codebuddy:conv-demo",
+      evidence: {
+        decision: "rerank",
+        rerank: {
+          weightedScore: 0.59,
+          dims: { relevance: 0.5, credibility: 0.5, freshness: 0.5, envCompat: 0.5, historicalEffect: 0.5, tokenCost: 0.5 },
+          passed: true,
+          trimmedByBudget: false,
+          rank: 5,
+          threshold: 0.55,
+        },
+      },
+    }));
+
+    const r = await executeReceipt(ctx());
+    // 叙事段：推荐资产带归一化加权分 + 跨 agent 来源（非 self）。
+    expect(r.messageText).toMatch(/- ⏳ \[Skill\] migration-expert-tips — 已选中待采用 · 六维重排入选 · 加权0.59 · 来源 agt-b/);
+    // 默认去重：注入 1（非 3）；--full 显示事件计数。（阶段按 STAGE_ORDER：选中在注入前）
+    expect(r.messageText).toContain("**证据链（按资产去重）：** 选中 1 · 注入 1");
+    const full = await executeReceipt(ctx("codebuddy:conv-demo", "--full"));
+    expect(full.messageText).toContain("**证据链（事件计数）：** 选中 1 · 注入 3");
+  });
+
   it("--json 输出结构化数据", async () => {
     seedDemoEvents();
     const r = await executeReceipt(ctx("codebuddy:conv-demo", "--json"));
@@ -128,6 +167,16 @@ describe("executeReceipt", () => {
     expect(parsed.assets.find((a) => a.asset_id === "skl-1")?.stages).toContain("used");
     expect(parsed.assets.find((a) => a.asset_id === "skl-1")?.effectiveness).toBe("validated");
     expect(parsed.assets.find((a) => a.asset_id === "skl-1")?.events.length).toBe(3);
+  });
+
+  it("回执不带 Panel 深链（⑨ 已移除 2026-09-05：CodeBuddy webview 点不开外链，用户决定删除）", async () => {
+    seedDemoEvents();
+    const r = await executeReceipt(ctx());
+    expect(r.messageText).not.toContain("Panel 证据页");
+    expect(r.messageText).not.toContain("/#/evidence");
+    // --json 同样不带。
+    const json = await executeReceipt(ctx("codebuddy:conv-demo", "--json"));
+    expect(json.messageText).not.toContain("Panel 证据页");
   });
 
   it("<assetId> 深潜：列出该资产全部证据事件", async () => {

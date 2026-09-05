@@ -354,6 +354,15 @@ export interface InjectionHook {
    */
   prewarm?(input: PrewarmInput): Promise<ContextBlock[]> | ContextBlock[];
   /**
+   * Optional staleness check (⑦ mid-session refresh). Consulted on a cache HIT
+   * for hooks with `cacheStrategy ∈ {"session_init", "hybrid"}`. Returning
+   * `true` routes this request through `execute(ctx)` and self-heals the cache
+   * with the fresh blocks — letting session-stable hooks (skill list, task2
+   * rerank) refresh when the conversation topic drifts or N turns elapse.
+   * Omitted → cached payload always served until a real cache miss.
+   */
+  shouldRefreshCache?(ctx: AgentContext, cached: ContextBlock[]): boolean | Promise<boolean>;
+  /**
    * Execute the hook.
    * @param ctx Current AgentContext (may have been modified by earlier hooks).
    * @returns ContextBlocks to inject. Return empty array to skip injection.

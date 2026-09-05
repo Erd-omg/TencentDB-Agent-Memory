@@ -222,12 +222,29 @@ export class AssetEventRepo {
     }
   }
 
-  /** 按资产取事件（跨会话）。 */
-  byAssetId(assetId: string): AssetEvent[] {
+  /**
+   * 按资产取事件（跨会话）。
+   *
+   * opts（历史效果维度，任务二）：
+   *   - teamId：只计同 team（team_id = ? OR team_id IS NULL —— 旧行 team 为空按同部署计入）；
+   *   - sinceMs：只计该时间点之后的事件（时间窗，避免过期/他人久远信号当高可信）。
+   *   不带 opts 时行为与原来一致（不设过滤）。
+   */
+  byAssetId(assetId: string, opts?: { teamId?: string; sinceMs?: number }): AssetEvent[] {
     try {
+      const clauses: string[] = ["asset_id = ?"];
+      const params: Array<string | number> = [assetId];
+      if (opts?.teamId) {
+        clauses.push("(team_id = ? OR team_id IS NULL)");
+        params.push(opts.teamId);
+      }
+      if (typeof opts?.sinceMs === "number") {
+        clauses.push("created_at >= ?");
+        params.push(opts.sinceMs);
+      }
       const rows = this.db
-        .prepare("SELECT * FROM asset_event WHERE asset_id = ? ORDER BY created_at ASC")
-        .all(assetId) as unknown as AssetEventRow[];
+        .prepare(`SELECT * FROM asset_event WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC`)
+        .all(...params) as unknown as AssetEventRow[];
       return rows.map(rowToEvent);
     } catch (err) {
       warnEvtSilent("byAssetId", err);

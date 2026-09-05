@@ -75,6 +75,12 @@ export interface SearchSkillsInput extends IdFields {
   query: string;
   top_k?: number;                        // 1..50, default 10
   mode?: "bm25" | "embedding" | "hybrid"; // default 'hybrid'
+  /**
+   * `scope: "team"` → core 剥掉 agent_id 做 team-wide 搜索（不按 owner 过滤）。
+   * 任务二「跨用户推荐」依赖它拿到跨 agent 候选；调用方必须自行配可见性
+   * 白名单过滤响应（防泄露他人 private skill）。
+   */
+  scope?: "team";
 }
 
 export interface SearchSkillsResult {

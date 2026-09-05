@@ -486,9 +486,12 @@ const DEFAULT_SEARCH_TOPK = 10;
  *
  * Failure: kernel call throws → propagate; skill-bridge fail-closes with
  * empty items so LLM never sees an unfiltered team search.
+ *
+ * 导出供任务二 `Task2SelectedAssetsInjector` 复用（团队检索同样必须过白名单）。
+ * 参数放宽到 `Pick<ProxyConfig, "coreSkill">`——函数体只依赖 coreSkill。
  */
-function defaultVisibleSkillIdsResolver(
-  config: ProxyConfig,
+export function defaultVisibleSkillIdsResolver(
+  config: Pick<ProxyConfig, "coreSkill">,
 ): VisibleSkillIdsResolver {
   return async ({ user_id, team_id, user_key, space_id }) => {
     // Use the real space_id from the request (kernel routes tenants by

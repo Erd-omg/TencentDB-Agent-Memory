@@ -76,6 +76,27 @@ export interface AssetEventEvidence {
     pass: boolean;
     detail?: string;
   };
+  /**
+   * 任务二 六维重排决策证据（selected(decision="rerank")）。
+   * 记录"选了谁 / 为什么 / 排除谁"：加权总分 + 六维分 + 入选判定 + 是否被预算裁剪。
+   * 与 selected(decision="direct-read") 用 decision 字段区分。
+   */
+  rerank?: {
+    weightedScore: number;
+    dims: {
+      relevance: number;
+      credibility: number;
+      freshness: number;
+      envCompat: number;
+      historicalEffect: number;
+      tokenCost: number;
+    };
+    passed: boolean;
+    /** 入选但超出 token 预算被裁剪（落 selected 但不落 injected）。 */
+    trimmedByBudget: boolean;
+    rank: number;
+    threshold: number;
+  };
 }
 
 /** 一条持久化的资产事件（asset_event 表行）。 */

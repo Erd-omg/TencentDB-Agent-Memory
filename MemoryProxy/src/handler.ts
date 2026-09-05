@@ -52,6 +52,7 @@ import { shouldAutoAppendReceipt, hasAssetEngagement } from "./evidence/task-com
 import { renderReceiptSummary } from "./evidence/receipt-summary.js";
 import { recordChatTurn } from "./evidence/turn-tracker.js";
 import { runAutoValidation } from "./evidence/auto-validate.js";
+import { maybeRunAutoFinalize } from "./evidence/finalize.js";
 import {
   enforceRateLimit,
   isRateLimitExceededError,
@@ -1637,6 +1638,9 @@ export async function handleChatCompletions(
         // 任务四 ②：收尾自动验证 used-未-validated 的 skill（有界 await，
         // 让回执直接带真实验证结果）。失败由外层 try/catch 兜住。
         await runAutoValidation({ sessionKey, sessionInfo: sessionInfo ?? {}, config });
+        // 任务结束 git-diff 关联（可选，默认关）：taskRepos 命中时 fire-and-forget
+        // 抓真实 diff + 跑真实测试 → 给相关资产写 validated(真退出码+code_diff/outcome)。
+        maybeRunAutoFinalize(sessionKey, sessionInfo ?? {}, config);
         const autoSummary = renderReceiptSummary(sessionKey);
         if (process.env.PROXY_DEBUG_AUTO_RECEIPT) {
           console.log(`[auto-receipt] TRIGGER session=${sessionKey} summary=${autoSummary ? autoSummary.length : "null"}`);
@@ -2361,6 +2365,8 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
                 sessionInfo: ctx.sessionInfo ?? {},
                 config: ctx.config,
               });
+              // 任务结束 git-diff 关联（可选，默认关）：fire-and-forget，同 auto-validation 姿势。
+              maybeRunAutoFinalize(ctx.sessionKey, ctx.sessionInfo ?? {}, ctx.config);
             }
           } catch (err: unknown) {
             pipe.error("AUTO_RECEIPT", err);
