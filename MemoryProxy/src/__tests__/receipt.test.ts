@@ -83,44 +83,52 @@ describe("executeReceipt", () => {
     expect(r.messageText).toContain("暂无资产证据");
   });
 
-  it("默认：Markdown 分组 + 资产卡 + 有效性 + reference_only 折叠", async () => {
+  it("默认：对外平实语言（类别分组 + 作用/为什么适用/plain 风险；去工程口径）", async () => {
     seedDemoEvents();
     const r = await executeReceipt(ctx());
     expect(r.success).toBe(true);
     expect(r.messageText).toContain("## 📋 资产使用回执（本会话）");
-    expect(r.messageText).toContain("**应用资产：2 项**（Skill 1 · Chat-Memory 1）");
-    expect(r.messageText).toContain("**证据链（按资产去重）：** 注入 2 · 使用 1 · 已验证 1");
-    expect(r.messageText).toContain("**有效性：** ✅已验证 1");
-    // 叙事段：Top 资产一句话人话（推荐/使用/验证），reference_only 不出现。
-    expect(r.messageText).toContain("**本次任务相关资产（按重要性）：**");
-    expect(r.messageText).toMatch(/- ✅ \[Skill\] tool-guide — 已通过测试验证 · \[command\] exit=0 PASS/);
-    // 类型分组标题
-    expect(r.messageText).toContain("## Skill（1）");
-    expect(r.messageText).toContain("## Chat-Memory（1）");
-    // 资产卡（阶段路径 / 有效性 / 最新证据）
-    expect(r.messageText).toContain("### tool-guide v3 · 来源 self");
-    expect(r.messageText).toContain("注入 → 使用 → 已验证");
-    expect(r.messageText).toContain("✅ 已通过测试验证");
-    expect(r.messageText).toContain("exit=0");
-    // 决策证据（used 事件 tool_call）
-    expect(r.messageText).toContain("决策证据：工具调用 skill-bridge/get-by-name");
-    // reference_only 默认折叠 → 不渲染卡片细节（来源 迁移专家 不应出现）
-    expect(r.messageText).toContain("> 💤 仅背景参考（1 项）");
-    expect(r.messageText).not.toContain("来源 迁移专家");
-    // 脚注（数据来源诚实边界）
-    expect(r.messageText).toContain("数据来自 asset_event 事件表");
+    // 平实标题 + 计数（非工程术语）。
+    expect(r.messageText).toContain("本次应用 2 项团队资产");
+    expect(r.messageText).toMatch(/✅ 1 项已通过验证/);
+    // 类别分组（过程资产类别）＋ 每卡「作用/为什么适用/风险」。
+    expect(r.messageText).toMatch(/^## 📘 历史方案（1 项）$/m);
+    expect(r.messageText).toContain("### tool-guide v3 · ✅ 已通过测试验证");
+    expect(r.messageText).toContain("- 作用：");
+    expect(r.messageText).toContain("- 为什么适用：");
+    expect(r.messageText).toContain("- 风险：");
+    // reference_only 折叠（按字符截断名字）。
+    expect(r.messageText).toMatch(/仅背景参考（1 项）：用户偏好 NTFS ACL/);
+    // 去工程口径：无阶段路径/决策证据/证据详情提示/归因。
+    expect(r.messageText).not.toContain("召回 → 选中");
+    expect(r.messageText).not.toContain("决策证据：");
+    expect(r.messageText).not.toContain("证据详情：");
+    expect(r.messageText).not.toContain("归因:");
+    // 文末导出入口提示。
+    expect(r.messageText).toContain("mem:receipt --json");
+    expect(r.messageText).toContain("mem:receipt --full");
+    // 数据来源（非模型自述）。
+    expect(r.messageText).toContain("asset_event 事件表");
   });
 
-  it("--full 展开 reference_only 资产卡", async () => {
+  it("--full 技术明细（阶段/决策证据/证据细节/类型分组/双计数）", async () => {
     seedDemoEvents();
     const r = await executeReceipt(ctx("codebuddy:conv-demo", "--full"));
+    // 技术标题带来源
     expect(r.messageText).toContain("### 用户偏好 NTFS ACL · 来源 迁移专家");
     expect(r.messageText).not.toContain("> 💤 仅背景参考");
+    // 工程锚点：阶段路径/决策证据/证据细节。
+    expect(r.messageText).toContain("注入 → 使用 → 已验证");
+    expect(r.messageText).toContain("决策证据：工具调用 skill-bridge/get-by-name");
+    expect(r.messageText).toContain("证据细节：[command] exit=0");
+    // 类型分组（## Skill（N））+ 双计数。
+    expect(r.messageText).toMatch(/^## Skill（1）$/m);
+    expect(r.messageText).toContain("**证据链（事件计数）：**");
   });
 
-  it("叙事段展示任务二推荐资产（六维加权分 + 跨 agent 来源）；injected 按资产去重", async () => {
+  it("推荐资产卡 - 有 rerank 时给出平实「为什么适用」；injected 计数在 --full 按资产去重", async () => {
     const repo = getAssetEventRepo()!;
-    // 同一资产多轮 injected（缓存命中重打）→ 默认回执只按资产计 1。
+    // 同一资产多轮 injected（缓存命中重打）→ 回执按资产去看（--full 双口径可见）。
     for (let i = 0; i < 3; i++) {
       repo.insert(repo.newEvent({
         stage: "injected",
@@ -146,11 +154,12 @@ describe("executeReceipt", () => {
     }));
 
     const r = await executeReceipt(ctx());
-    // 叙事段：推荐资产带归一化加权分 + 跨 agent 来源（非 self）。
-    expect(r.messageText).toMatch(/- ⏳ \[Skill\] migration-expert-tips — 已选中待采用 · 六维重排入选 · 加权0.59 · 来源 agt-b/);
-    // 默认去重：注入 1（非 3）；--full 显示事件计数。（阶段按 STAGE_ORDER：选中在注入前）
-    expect(r.messageText).toContain("**证据链（按资产去重）：** 选中 1 · 注入 1");
+    // 默认平实标题（无来源）＋ 平实「为什么适用」（含综合分）。
+    expect(r.messageText).toContain("### migration-expert-tips · ⏳ 已选中待采用");
+    expect(r.messageText).toContain("为什么适用：");
+    // --full 双计数：按资产去重 注入 1（非 3）；事件计数 注入 3（阶段按 STAGE_ORDER：选中在注入前）。
     const full = await executeReceipt(ctx("codebuddy:conv-demo", "--full"));
+    expect(full.messageText).toContain("**证据链（按资产去重）：** 选中 1 · 注入 1");
     expect(full.messageText).toContain("**证据链（事件计数）：** 选中 1 · 注入 3");
   });
 
@@ -209,9 +218,12 @@ describe("executeReceipt", () => {
     }));
 
     const r = await executeReceipt(ctx());
-    expect(r.messageText).toContain("❌ 需修正");
-    expect(r.messageText).toContain("注入 → 已纠正");
-    expect(r.messageText).toContain("❌需修正 1");
+    // 默认平实：标题带「❌ 需修正」＋ 计数「❌ 1 项需修正」。
+    expect(r.messageText).toContain("### broken · ❌ 需修正");
+    expect(r.messageText).toContain("❌ 1 项需修正");
+    // --full 保留阶段路径（注入 → 已纠正）。
+    const full = await executeReceipt(ctx("codebuddy:conv-demo", "--full"));
+    expect(full.messageText).toContain("注入 → 已纠正");
   });
 
   it("validated-无-used → 汇总行暴露 ⚠️已标记验证(缺使用)", async () => {
@@ -229,7 +241,11 @@ describe("executeReceipt", () => {
     }));
 
     const r = await executeReceipt(ctx());
-    expect(r.messageText).toContain("⚠️已标记验证(缺使用) 1");
+    // 默认平实诚实说明（不再用 validated_no_use 术语计数）。
+    expect(r.messageText).toContain("但证据中缺少「实际使用」记录");
+    // 状态徽标（EFFECTIVENESS_META 标签）仍在标题。
     expect(r.messageText).toContain("⚠️ 已标记验证（缺使用证据）");
+    // --full 保留精确术语 ⇐ already covered; 这里再确认 default 无该术语计数。
+    expect(r.messageText).not.toContain("已标记验证(缺使用) 1");
   });
 });

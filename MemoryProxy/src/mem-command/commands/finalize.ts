@@ -18,6 +18,7 @@ import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { getAssetEventRepo } from "../../db/assetEventRepo.js";
 import { runTaskFinalize } from "../../evidence/finalize.js";
+import { mdHeader, mdSection, mdBullet, mdBlank, mdFootnote, mdJoin } from "../md.js";
 
 /** 解析显式参数：--repo <单token>、--test <到末尾>。 */
 function parseArgs(args: string): { repo?: string; test?: string } {
@@ -82,27 +83,40 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     repoEvents,
   });
 
-  // —— 输出 ——
-  const lines: string[] = ["📋 任务结束归因（mem:finalize）"];
-  lines.push(`  仓库：${outcome.repo}`);
+  // —— 输出（Markdown 统一版式；关键 token 保留供 verify-* grep）——
+  const md: Array<string | undefined> = [
+    mdHeader("⚙️", "任务结束归因（mem:finalize）"),
+    mdBlank(),
+    mdSection("仓库 / 变更"),
+    mdBullet(`仓库：\`${outcome.repo}\``),
+  ];
   if (!outcome.hasChange) {
-    lines.push(`  ⏭  未写 validated：${outcome.reason ?? "无代码变更"}`);
-    const text = lines.join("\n");
+    md.push(mdBullet(`⏭ 未写 validated：${outcome.reason ?? "无代码变更"}`));
+    const text = mdJoin(md);
     return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
   }
-  lines.push(`  变更：${outcome.diffStat?.split("\n").pop() ?? ""}`);
+  md.push(mdBullet(`变更：${outcome.diffStat?.split("\n").pop() ?? ""}`));
   if (typeof outcome.exitCode === "number") {
-    lines.push(`  测试：\`${outcome.testCmd}\` → exit ${outcome.exitCode}${outcome.durationMs ? `（${outcome.durationMs}ms）` : ""}`);
+    md.push(mdBullet(`测试：\`${outcome.testCmd}\` → exit ${outcome.exitCode}${outcome.durationMs ? `（${outcome.durationMs}ms）` : ""}`));
   }
+  md.push(mdBlank(), mdSection("归因（token 相关度，启发式非因果）"));
   if (outcome.correlated.length === 0) {
-    lines.push("  归因：本会话 used/selected 资产与本次 diff 无 token 共现，未写 validated（留 ⏳待验证）。");
+    md.push(mdBullet("本会话 used/selected 资产与本次 diff 无 token 共现，未写 validated（留 ⏳待验证）。"));
   } else if (outcome.exitCode === 0) {
-    lines.push(`  归因（token 相关度）：${outcome.correlated.length} 项相关 → 写 validated（真测试通过）`);
+    const nWrite = outcome.validatedAssetIds.length;
+    const nWeak = outcome.weakRefusals.length;
+    md.push(mdBullet(`相关 ${outcome.correlated.length} 项 → 写 validated ${nWrite} 项（真测试通过）${nWeak ? ` · 弱命中跳过 ${nWeak} 项` : ""}`));
     for (const c of outcome.correlated) {
-      lines.push(`    ✅ ${c.asset.name || c.asset.assetId}（${c.asset.assetType}）hits=[${c.hitTokens.join(",")}]`);
+      const weak = outcome.weakRefusals.find((w) => w.assetId === c.asset.assetId);
+      if (weak) {
+        md.push(mdBullet(`⏭ ${c.asset.name || c.asset.assetId}（${c.asset.assetType}）弱命中 → 跳过防摊分（${weak.reason}）`));
+      } else {
+        const anchor = c.pathHits.length > 0 ? "path" : (c.distinctiveHits.length > 0 ? "独有" : "普通");
+        md.push(mdBullet(`✅ ${c.asset.name || c.asset.assetId}（${c.asset.assetType}）hits=[${c.hitTokens.join(",")}]（${anchor}锚点）`));
+      }
     }
   } else {
-    lines.push(`  ⚠️  测试未通过（exit ${outcome.exitCode}），相关 ${outcome.correlated.length} 项资产不写 validated。`);
+    md.push(mdBullet(`⚠️ 测试未通过（exit ${outcome.exitCode}），相关 ${outcome.correlated.length} 项资产不写 validated。`));
   }
   const data: Record<string, unknown> = {
     repo: outcome.repo,
@@ -113,10 +127,18 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     exit_code: outcome.exitCode ?? null,
     test_output: outcome.testOutput?.slice(0, 500) ?? null,
     duration_ms: outcome.durationMs ?? null,
-    correlated: outcome.correlated.map((c) => ({ asset_id: c.asset.assetId, hits: c.hitTokens })),
+    used_candidate_count: outcome.usedCandidateCount,
+    correlated: outcome.correlated.map((c) => ({
+      asset_id: c.asset.assetId,
+      hits: c.hitTokens,
+      path_hits: c.pathHits,
+      distinctive_hits: c.distinctiveHits,
+      shared_hits: c.sharedHits,
+    })),
+    weak_refusals: outcome.weakRefusals,
     validated: outcome.validatedAssetIds,
   };
 
-  const messageText = lines.join("\n");
+  const messageText = mdJoin(md);
   return { success: true, messageText, data, response: buildMemResponse(messageText, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
 }

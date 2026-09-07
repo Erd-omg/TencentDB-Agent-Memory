@@ -76,13 +76,30 @@ function hit(o: HitSeed): RetrievalHit {
   };
 }
 
-/** 向临时 repo 插入一条事件。 */
+/** 向临时 repo 插入一条事件（无身份——供"事件计数公式"类用例）。 */
 function addEvt(stage: AssetEventStage, assetId: string): void {
   const repo = getAssetEventRepo()!;
   repo.insert(repo.newEvent({
     stage,
     asset: { assetId, assetType: "skill", name: assetId },
     sessionKey: "hist-session",
+  }));
+}
+
+/** 身份感知插入：带 user_id/team_id/sessionKey/createdAt —— 用于跨用户/跨会话聚合用例。 */
+function addEvtX(
+  stage: AssetEventStage,
+  assetId: string,
+  o: { userId?: string; sessionKey?: string; teamId?: string; createdAt?: number } = {},
+): void {
+  const repo = getAssetEventRepo()!;
+  repo.insert(repo.newEvent({
+    stage,
+    asset: { assetId, assetType: "skill", name: assetId },
+    sessionKey: o.sessionKey ?? "hist-session",
+    ...(o.teamId ? { teamId: o.teamId } : {}),
+    ...(o.userId ? { userId: o.userId } : {}),
+    ...(typeof o.createdAt === "number" ? { createdAt: o.createdAt } : {}),
   }));
 }
 
@@ -154,14 +171,17 @@ describe("rerankCandidates — freshness 半衰期", () => {
   });
 });
 
-describe("rerankCandidates — credibility 跨会话", () => {
-  it("validated 强、used 中、corrected 惩罚、无历史中性", () => {
-    addEvt("validated", "skl-v");
-    addEvt("validated", "skl-v");
-    addEvt("validated", "skl-v");
-    addEvt("used", "skl-u");
-    addEvt("used", "skl-c");
-    addEvt("corrected", "skl-c");
+describe("rerankCandidates — credibility（同 team 跨用户/跨会话聚合）", () => {
+  it("他 user 的 validated/used（同 team）计入本会话可信度；无历史中性；corrected 打对折", () => {
+    // 事件带真实 user_id（usr-A/B/C 互不相同）+ 不同 sessionKey + team-a。byAssetId 只按
+    // (asset, team, 窗口) 聚合、不过滤 user → usr-B/C 的 validated/used 会抬升 ctx 的可信度
+    // （ctx 是会话 usr-A 视角，属同 team 跨用户历史信号）。
+    addEvtX("validated", "skl-v", { userId: "usr-A", sessionKey: "sess-a1", teamId: "team-a" });
+    addEvtX("validated", "skl-v", { userId: "usr-A", sessionKey: "sess-a2", teamId: "team-a" });
+    addEvtX("validated", "skl-v", { userId: "usr-B", sessionKey: "sess-b1", teamId: "team-a" }); // B 的验证
+    addEvtX("used", "skl-u", { userId: "usr-B", sessionKey: "sess-b1", teamId: "team-a" });
+    addEvtX("used", "skl-c", { userId: "usr-C", sessionKey: "sess-c1", teamId: "team-a" });
+    addEvtX("corrected", "skl-c", { userId: "usr-C", sessionKey: "sess-c1", teamId: "team-a" });
 
     const hits = [
       hit({ skill_id: "skl-v", score: 0.7 }),
@@ -178,15 +198,16 @@ describe("rerankCandidates — credibility 跨会话", () => {
   });
 });
 
-describe("rerankCandidates — historicalEffect 跨用户", () => {
-  it("有效复用比 (validated+0.5·used)/复用次数，corrected 拉低", () => {
-    addEvt("used", "skl-a");
-    addEvt("used", "skl-a");
-    addEvt("validated", "skl-a");
-    addEvt("validated", "skl-a");
-    addEvt("used", "skl-b");
-    addEvt("used", "skl-d");
-    addEvt("corrected", "skl-d");
+describe("rerankCandidates — historicalEffect（同 team 跨用户：他 user 的 validated 计入）", () => {
+  it("有效复用比 (validated+0.5·used)/复用次数，corrected 拉低；事件来自不同 user/会话仍聚合", () => {
+    addEvtX("used", "skl-a", { userId: "usr-A", sessionKey: "sess-a1", teamId: "team-a" });
+    addEvtX("used", "skl-a", { userId: "usr-A", sessionKey: "sess-a1", teamId: "team-a" });
+    addEvtX("validated", "skl-a", { userId: "usr-B", sessionKey: "sess-b1", teamId: "team-a" }); // B 的验证计入
+    addEvtX("validated", "skl-a", { userId: "usr-B", sessionKey: "sess-b2", teamId: "team-a" });
+    addEvtX("used", "skl-b", { userId: "usr-C", sessionKey: "sess-c1", teamId: "team-a" });
+    addEvtX("used", "skl-b", { userId: "usr-C", sessionKey: "sess-c2", teamId: "team-a" });
+    addEvtX("used", "skl-d", { userId: "usr-A", sessionKey: "sess-a2", teamId: "team-a" });
+    addEvtX("corrected", "skl-d", { userId: "usr-A", sessionKey: "sess-a2", teamId: "team-a" });
 
     const hits = [
       hit({ skill_id: "skl-a", score: 0.7 }),
@@ -200,6 +221,84 @@ describe("rerankCandidates — historicalEffect 跨用户", () => {
     expect(byId["skl-b"].dimScores.historicalEffect).toBeCloseTo(0.5, 5);
     expect(byId["skl-c"].dimScores.historicalEffect).toBe(0.5);
     expect(byId["skl-d"].dimScores.historicalEffect).toBeCloseTo(0.3, 5);
+  });
+});
+
+describe("rerankCandidates — cross-user gain flip（A 的 validated 抬升 B → 翻转入选）", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("usr-A 对共享 skill S 的 used/validated → usr-B(ctx) 检索 S 的 credibility/historicalEffect 抬升并翻转入选", () => {
+    const ctxB = { ...CTX, userId: "usr-B" }; // 跨用户：S 的历史由 usr-A 沉淀，ctx 是 usr-B
+    const repo = getAssetEventRepo()!;
+    const hits = [
+      hit({ skill_id: "skl-gain", name: "skl-gain", owner_agent_id: "agt-a", team_id: "team-a", score: 0.5 }),
+      hit({ skill_id: "skl-neu", name: "skl-neu", owner_agent_id: "agt-a", team_id: "team-a", score: 0.5 }),
+    ];
+    const mk = (windowDays: number, threshold: number, topN: number) => ({
+      ...CFG, selectedThreshold: threshold, topN,
+      effect: { sameTeamOnly: true, windowDays },
+    });
+    const deps = { repo, now: (): number => NOW };
+
+    // baseline：windowDays≈0 → usr-A 的历史在窗外 → S 与 N 同为中性、不入选。
+    const base = rerankCandidates({ hits, ctx: ctxB, cfg: mk(0.001, 0.65, 1), deps });
+    const gainBase = base.find((c) => c.hit.assetId === "skl-gain")!;
+    expect(gainBase.dimScores.credibility).toBe(0.5);
+    expect(gainBase.dimScores.historicalEffect).toBe(0.5);
+    expect(gainBase.passed).toBe(false);
+
+    // seed usr-A 的 used×2 + validated×2（两条不同 session、team-a、NOW-1d）→ 90 天窗内计入。
+    const seedAt = NOW - DAY;
+    const seed: Array<[AssetEventStage, string]> = [
+      ["used", "sess-A-0"], ["used", "sess-A-1"], ["validated", "sess-A-0"], ["validated", "sess-A-1"],
+    ];
+    seed.forEach(([stage, sess], i) => {
+      repo.insert(repo.newEvent({
+        stage,
+        asset: { assetId: "skl-gain", assetType: "skill", name: "skl-gain" },
+        sessionKey: sess,
+        teamId: "team-a",
+        userId: "usr-A",
+        createdAt: seedAt + i, // 微错开，保证 created_at 严格单调
+      }));
+    });
+
+    // boost：90 天窗计入 usr-A 的 validated → S 加权抬升、翻转入选；对照 N 仍不入选。
+    const boost = rerankCandidates({ hits, ctx: ctxB, cfg: mk(90, 0.65, 1), deps });
+    const g = boost.find((c) => c.hit.assetId === "skl-gain")!;
+    const n = boost.find((c) => c.hit.assetId === "skl-neu")!;
+    expect(g.dimScores.credibility).toBeCloseTo(1.0, 5);      // (2·validated+used)/6 = (4+2)/6
+    expect(g.dimScores.historicalEffect).toBeCloseTo(0.75, 5); // (2+0.5·2)/4
+    expect(g.dimScores.credibility).toBeGreaterThan(0.5);
+    expect(g.dimScores.historicalEffect).toBeGreaterThan(0.5);
+    expect(g.weightedScore).toBeGreaterThan(gainBase.weightedScore + 1e-6);
+    expect(g.passed).toBe(true);   // 中性 ~0.60 < 阈值 0.65；抬升后 ≥0.65 → 翻转入选
+    expect(n.passed).toBe(false);  // 对照：无历史的 N 未抬升，仍不入选
+  });
+
+  it("负向：同批 validated 若属他 team(team-z) → 不抬升 ctx(team-a)（对照）", () => {
+    const repo = getAssetEventRepo()!;
+    const deps = { repo, now: (): number => NOW };
+    const seedAt = NOW - DAY;
+    for (let i = 0; i < 2; i++) {
+      repo.insert(repo.newEvent({
+        stage: "validated",
+        asset: { assetId: "skl-x", assetType: "skill", name: "skl-x" },
+        sessionKey: `sess-z-${i}`,
+        teamId: "team-z",
+        userId: "usr-A",
+        createdAt: seedAt + i,
+      }));
+    }
+    const hitX = hit({ skill_id: "skl-x", name: "skl-x", owner_agent_id: "agt-a", team_id: "team-a", score: 0.5 });
+    const out = rerankCandidates({
+      hits: [hitX], ctx: CTX,
+      cfg: { ...CFG, selectedThreshold: 0.65, topN: 1, effect: { sameTeamOnly: true, windowDays: 90 } },
+      deps,
+    });
+    // 他 team 的 validated 被 sameTeamOnly 排除 → credibility 中性 → 不抬升、不入选。
+    expect(out[0].dimScores.credibility).toBe(0.5);
+    expect(out[0].passed).toBe(false);
   });
 });
 

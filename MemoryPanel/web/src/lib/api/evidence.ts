@@ -52,7 +52,10 @@ export interface ReceiptAsset {
 export interface ReceiptData {
   session_key: string;
   asset_count: number;
+  /** 事件口径阶段计数（每轮缓存重打会累加，如 injected）。 */
   stage_counts: Record<string, number>;
+  /** 按资产去重口径阶段计数（= 回执正文「证据链（按资产去重）」；与 stage_counts 两口径并存）。 */
+  distinct_stage_counts?: Record<string, number>;
   effectiveness: Record<string, number>;
   chain_issues: Array<{ level: string; asset_id: string; missing: string; message: string }>;
   assets: ReceiptAsset[];

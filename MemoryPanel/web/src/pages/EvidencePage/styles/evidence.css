@@ -4,7 +4,7 @@
 ._memory-evidence-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
 }
 
 /* ── 详情区（右侧） ─────────────────────────────────────────────── */
@@ -14,7 +14,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   padding: 2px 2px 16px;
 }
 
@@ -28,6 +28,17 @@
   border-radius: 6px;
   background: var(--tea-color-bg-primary-default);
   box-shadow: var(--tea-shadow-xs);
+}
+/* 每颗状态徽章：允许换行且不截断（Tea Tag 默认 max-width 会压缩长文案） */
+._evidence-summary ._asset-status {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+._evidence-summary ._asset-status .tea-tag {
+  white-space: nowrap;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 /* ── 证据链完整性提醒（F4） ─────────────────────────────────────── */
@@ -55,61 +66,9 @@
   margin: 4px 0 0;
 }
 
-/* ── 资产卡 ─────────────────────────────────────────────────────── */
-._evidence-card {
-  --card-body-padding: 16px;
-}
-._evidence-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-._evidence-card-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-._evidence-card-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--tea-color-text-primary);
-}
-._evidence-card-stages {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--tea-color-text-secondary);
-}
-._evidence-stage-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--tea-color-bg-secondary-default);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-._evidence-stage-arrow {
-  margin: 0 4px;
-  color: var(--tea-color-text-tertiary);
-}
-._evidence-card-risks {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-._evidence-label {
-  color: var(--tea-color-text-tertiary);
-  font-size: 12px;
-  margin-right: 2px;
-}
+/* ── 资产卡（已收敛到共享 components/asset/AssetCard + asset-card.css 的 ._asset-card-*） ──
+ * 证据展开行仍用 class="_evidence-details"（EvidenceRow 内层折叠）。
+ */
 ._evidence-details {
   margin-top: 8px;
   border-top: 1px dashed var(--tea-color-border-primary-default);
@@ -151,4 +110,30 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 多行证据（outcome/code_diff/归因）默认折叠为一行；内层 <details> 点开再展开。 */
+._evidence-row-desc._evidence-details {
+  padding-top: 0;
+  border-top: none;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+._evidence-row-summary {
+  cursor: pointer;
+  color: var(--tea-color-text-secondary);
+  font-size: 12px;
+  user-select: none;
+}
+._evidence-row-detail {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 4px;
+  white-space: pre-wrap;
+}
+._evidence-row-detail-line {
+  font-size: 12px;
+  color: var(--tea-color-text-tertiary);
 }

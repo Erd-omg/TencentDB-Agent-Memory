@@ -21,6 +21,7 @@ import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { getAssetEventRepo } from "../../db/assetEventRepo.js";
 import type { AssetEventStage } from "../../db/asset-event.js";
+import { mdHeader, mdSection, mdBullet, mdBlank, mdJoin } from "../md.js";
 
 /** corrected 需有这些前置阶段之一才允许（资产确实进入过链路，纠正才有意义）。 */
 const PREREQ_STAGES: AssetEventStage[] = ["recalled", "selected", "injected", "used", "validated"];
@@ -61,15 +62,23 @@ export async function executeCorrect(ctx: MemCommandContext): Promise<MemCommand
   const parts = ctx.args.trim().split(/\s+/);
   const assetId = parts[0] || undefined;
   if (!assetId) {
-    const text = "❌ 用法：`mem:correct <assetId> [原因]`\n"
-      + "例：`mem:correct skl-xxx 里面的命令过时了，新版 API 已改名`";
+    const text = mdJoin([
+      mdHeader("❌", "用法"),
+      mdBlank(),
+      mdBullet("`mem:correct <assetId> [原因]`"),
+      mdBullet("例：`mem:correct skl-xxx 里面的命令过时了，新版 API 已改名`"),
+    ]);
     return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
   }
 
   const sessionKey = ctx.sessionKey;
   const check = findCorrigibleAsset(repo, sessionKey, assetId);
   if (!check.ok) {
-    const text = `❌ ${check.reason}`;
+    const text = mdJoin([
+      mdHeader("❌", "无法纠正"),
+      mdBlank(),
+      mdBullet(check.reason!),
+    ]);
     return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
   }
 
@@ -101,9 +110,22 @@ export async function executeCorrect(ctx: MemCommandContext): Promise<MemCommand
   }));
 
   const reasonLine = reason ? `原因：${reason}` : "未附原因";
-  const text = `✅ 已记录用户纠正（corrected）\n`
-    + `  资产：${asset.name || asset.assetId}（${asset.assetType}${asset.version ? ` v${asset.version}` : ""}）\n`
-    + `  ${reasonLine}\n`
-    + `  证据来源：user（用户/评审主动反馈）`;
-  return { success: true, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
+  const text = mdJoin([
+    mdHeader("✏️", "已记录用户纠正（corrected）"),
+    mdBlank(),
+    mdSection("资产"),
+    mdBullet(`${asset.name || asset.assetId}（${asset.assetType}${asset.version ? ` v${asset.version}` : ""}）`),
+    mdSection("纠正"),
+    mdBullet(reasonLine),
+    mdSection("证据"),
+    mdBullet("来源：user（用户/评审主动反馈）"),
+  ]);
+  const data = {
+    asset_id: asset.assetId,
+    asset_type: asset.assetType,
+    stage: "corrected",
+    source: "user",
+    reason: reason || null,
+  };
+  return { success: true, messageText: text, data, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
 }

@@ -157,6 +157,30 @@ describe("Task2SelectedAssetsInjector.prewarm", () => {
     expect(skl2.evidence!.rerank!.trimmedByBudget).toBe(false);
   });
 
+  it("跨用户历史信号：他 user(usr-9) 对他人(agt-b) 团队共享 skill 的 validated → 本会话(usr-1) 检索时 effect/credibility 抬升", async () => {
+    const repo = getAssetEventRepo()!;
+    // skl-2 owner=agt-b、team-visible（白名单 resolverAll 放行）；validated 事件 user=usr-9 ≠ 会话 usr-1。
+    // byAssetId 只按 (team, 窗口) 聚合、不过滤 user → usr-9 的 validated 计入 usr-1 的 rerank。
+    for (let i = 0; i < 2; i++) {
+      repo.insert(repo.newEvent({
+        stage: "validated",
+        asset: { assetId: "skl-2", assetType: "skill", name: "migration-expert-tips" },
+        sessionKey: `sess-u9-${i}`,
+        teamId: "team-a",
+        userId: "usr-9",
+      }));
+    }
+    const inj = makeInjector();
+    await inj.prewarm(makeInput());
+
+    const skl2 = getAssetEventRepo()!.bySessionKey("sess-1", "selected").find((e) => e.asset.assetId === "skl-2")!;
+    expect(skl2).toBeDefined();
+    expect(skl2.evidence?.decision).toBe("rerank");
+    expect(skl2.asset.source).toBe("agt-b");                                    // 跨 agent 来源（≠ self）
+    expect(skl2.evidence!.rerank!.dims.historicalEffect).toBeGreaterThan(0.5);  // usr-9 的 validated 抬升历史效果
+    expect(skl2.evidence!.rerank!.dims.credibility).toBeGreaterThan(0.5);       // validated×2 → cred>0.5
+  });
+
   it("预算过小 → kept 为空、降级骨架块；trimmed 落 selected 不打标 injected", async () => {
     const inj = makeInjector({
       retrieval: { ...RETRIEVAL, rerank: { ...RETRIEVAL.rerank, budgetTokens: 1 } },

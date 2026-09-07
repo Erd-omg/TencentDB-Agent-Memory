@@ -45,9 +45,46 @@ const chk = (label, a, b, tol = 1e-9) => {
   const same = Math.abs(Number(a) - Number(b)) <= tol;
   if (!same) {
     fail = 1;
-    console.error(`   ❌ ${label}: config.default=${a}  ${label.includes("example") ? "example" : "demo"}=${b}`);
+    const srcName = label.includes("example") ? "example" : label.includes("demo") ? "demo" : label.includes("local") ? "local" : "src";
+    console.error(`   ❌ ${label}: config.default=${a}  ${srcName}=${b}`);
   }
 };
+
+// ── 1b) 本地运行 config.yaml（fallback 感知：rerank 缺字段/effect 缺段=默认）────
+const LOCAL = join(PROXY_DIR, "config.yaml");
+let localCfg = null;
+try { localCfg = yaml.load(readFileSync(LOCAL, "utf8")); } catch { /* 缺失本地文件不阻断 example/demo 校验 */ }
+if (localCfg) {
+  const lc = localCfg?.retrieval;
+  console.log("── 校验 MemoryProxy/config.yaml（本地实际运行）vs DEFAULT_CONFIG.retrieval ──");
+  if (!lc) {
+    console.error("   ❌ config.yaml 缺少 retrieval: 段（本地联调应显式声明 rerank/effect，便于评审对齐）");
+    fail = 1;
+  } else {
+    const lw = lc.rerank?.weights ?? {};
+    for (const k of ["relevance", "credibility", "freshness", "envCompat", "historicalEffect", "tokenCost"]) {
+      chk(`weights.${k} (local)`, defRerank.weights[k], lw[k]);
+    }
+    chk("selectedThreshold (local)", defRerank.selectedThreshold, lc.rerank?.selectedThreshold);
+    chk("topN (local)", defRerank.topN, lc.rerank?.topN);
+    chk("candidateTopK (local)", defRerank.candidateTopK, lc.rerank?.candidateTopK);
+    chk("budgetTokens (local)", defRerank.budgetTokens, lc.rerank?.budgetTokens);
+    chk("freshnessHalfLifeDays (local)", defRerank.freshnessHalfLifeDays, lc.rerank?.freshnessHalfLifeDays);
+    // effect 段缺失 = 运行时回退默认（true/90）→ 不算漂移；有段但不同 → exit 1。
+    const lEffect = lc.effect ?? {};
+    chk("effect.sameTeamOnly (local)", Number(defEffect.sameTeamOnly ?? true), Number(lEffect.sameTeamOnly ?? true));
+    chk("effect.windowDays (local)", defEffect.windowDays ?? 90, lEffect.windowDays ?? 90);
+    // sources 差异仅提示（本地联调开 chat-memory/wiki 是预期，不属于数值漂移）。
+    const src = lc.sources ?? {};
+    const defSources = def.sources ?? {};
+    const chatOn = src.chatMemory?.enabled ?? false;
+    const wikiOn = src.wiki?.enabled ?? false;
+    if (chatOn !== (defSources.chatMemory?.enabled ?? false) || wikiOn !== (defSources.wiki?.enabled ?? false)) {
+      console.warn(`   ⚠ sources 与 DEFAULT 保守默认不同（本地联调预期，不阻断）：chatMemory=${chatOn} wiki=${wikiOn}`
+        + `（DEFAULT: chatMemory=${defSources.chatMemory?.enabled ?? false} wiki=${defSources.wiki?.enabled ?? false}）`);
+    }
+  }
+}
 
 // ── 2) config.example.yaml ───────────────────────────────────────────────────
 const exampleCfg = yaml.load(readFileSync(EXAMPLE, "utf8"));

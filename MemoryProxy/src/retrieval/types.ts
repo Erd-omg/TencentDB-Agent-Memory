@@ -51,7 +51,8 @@ export interface RetrievalHit {
   description?: string;
   /** 命中摘录 / why 片段（≤512B 指针）。 */
   snippet?: string;
-  /** 来源相关度分（候选集内 min-max 归一化，类型各自可比）。 */
+  /** 来源相关度分（**全候选池一次 min-max 归一化**，非分类型校准；各源原始分
+   * 尺度不同（skill -bm25 / atomic / wiki BM25），属池内相对信号；无 RRF、无按来源加权混合）。 */
   score?: number;
   version?: string | number;
   ownerAgentId?: string;

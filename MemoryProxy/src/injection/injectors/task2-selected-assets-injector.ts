@@ -5,11 +5,16 @@
  * 六维重排 → 预算裁剪 → 注入 `<task2_selected_assets>` 最小充分上下文（指针），
  * 并把重排决策落 `selected(decision="rerank")` + `injected` 事件。
  *
- * 核心价值（跨用户推荐）：
+ * 核心价值（团队内跨 agent 复用推荐；跨用户已双用户 e2e 验证，见 docs §18）：
  *   - 检索用 `scope:"team"` 拿到跨 agent 候选，且必须过 A∪B 可见性白名单
  *     （A=meta list-accessible(visibility=team)，B=agent 自有全量；A 失败 fail-closed）。
- *   - 历史效果维度按 asset_id 跨会话聚合（用户 A 的验证沉淀进共享资产，用户 B 检索时加权）。
+ *   - 历史效果维度按 asset_id 跨会话聚合（byAssetId 只按 team+时间窗、**不过滤 user**：
+ *     同团队另一 agent/用户对共享资产的 used/validated 会抬升本会话的排序加权）。
+ *     这只影响**排序分**，绝不把他人 validated 展示为本会话已验证
+ *     （validated 只写本会话 used 资产；回执仅聚合本会话事件）。
  *   - 每条候选标注来源（self / owner agent id / team），复用可追溯。
+ *   - 范围边界：chat-memory/profile 是个人记忆（per-team/agent/user 借调 ctx），
+ *     不参与跨用户复用；跨用户复用 = 团队共享 skill 资产 + 上述历史效果信号。
  *
  * 语义与任务三 selected 共存（选项1）：
  *   - 重排入选 = `selected` + evidence.decision="rerank" + evidence.rerank 六维分；

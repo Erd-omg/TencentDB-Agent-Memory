@@ -2,50 +2,17 @@
  * EvidenceDetail — 回执详情区（左侧会话列表选中后显示）。
  *
  * 结构：有效性汇总条 → 证据链完整性提醒（F4）→ 按类型分组的资产卡（可展开证据）。
- * 复用 _asset-* 设计系统 + tea 令牌色（无硬编码 hex），与 Skills/ChatMemory 页对齐。
+ * 卡片复用共享 AssetCard（components/asset/AssetCard）＋ 领域映射 asset-domain，
+ * 不再自建 `_evidence-card` 一套（防任务六第三套卡片）。
  */
 
 import { useTranslation } from 'react-i18next';
-import { Alert, Card, StatusTip, Tag, Text } from 'tea-component';
+import { Alert, StatusTip, Text } from 'tea-component';
 import { StatusTag, type StatusTheme } from '@/components/StatusTag';
+import { AssetCard } from '@/components/asset/AssetCard';
+import { effMeta, typeLabel, stageLabel, fmtTime, type TFunc } from '@/components/asset/asset-domain';
 import type { EvidenceEvent, ReceiptAsset, ReceiptData } from '@/lib/api/evidence';
 import '../styles/evidence.css';
-
-/** 有效性 → 展示（图标 + 语义 + Tea Tag 主题）。label 走 i18n（P1 #7b 本地化）。 */
-function effMeta(t: (k: string) => string): Record<string, { icon: string; label: string; theme: StatusTheme }> {
-  return {
-    corrected: { icon: '❌', label: t('evidence.eff.corrected'), theme: 'error' },
-    validated: { icon: '✅', label: t('evidence.eff.validated'), theme: 'success' },
-    validated_no_use: { icon: '⚠️', label: t('evidence.eff.validated_no_use'), theme: 'warning' },
-    reused: { icon: '🔄', label: t('evidence.eff.reused'), theme: 'success' },
-    adopted: { icon: '⏳', label: t('evidence.eff.adopted'), theme: 'default' },
-    selected: { icon: '⏳', label: t('evidence.eff.selected'), theme: 'default' },
-    reference_only: { icon: '💤', label: t('evidence.eff.reference_only'), theme: 'default' },
-  };
-}
-
-/** 风险等级 → Tea Tag 主题。 */
-const RISK_THEME: Record<string, StatusTheme> = { low: 'default', medium: 'warning', high: 'error' };
-
-function typeLabel(t: (k: string) => string): Record<string, string> {
-  return {
-    skill: 'Skill', 'chat-memory': 'Chat-Memory', profile: 'Profile',
-    wiki: 'Wiki', 'code-graph': 'CodeGraph', 'product-knowledge': t('evidence.type.product_knowledge'),
-  };
-}
-
-function stageLabel(t: (k: string) => string): Record<string, string> {
-  return {
-    recalled: t('evidence.stage.recalled'), selected: t('evidence.stage.selected'),
-    injected: t('evidence.stage.injected'), used: t('evidence.stage.used'),
-    validated: t('evidence.stage.validated'), corrected: t('evidence.stage.corrected'),
-    contributed: t('evidence.stage.contributed'),
-  };
-}
-
-function fmtTime(ts: number): string {
-  return new Date(ts).toLocaleString('zh-CN', { hour12: false });
-}
 
 /** 有效性汇总条（彩色徽章）。 */
 function SummaryStrip({ eff }: { eff: Record<string, number> }) {
@@ -65,9 +32,7 @@ function SummaryStrip({ eff }: { eff: Record<string, number> }) {
     <div className="_evidence-summary">
       {shown.map((b) => {
         const m = meta[b.key];
-        return (
-          <StatusTag key={b.key} label={`${m.icon} ${m.label} ${b.count}`} theme={m.theme} />
-        );
+        return <StatusTag key={b.key} label={`${m.icon} ${m.label} ${b.count}`} theme={m.theme} />;
       })}
     </div>
   );
@@ -82,86 +47,78 @@ function ChainWarning({ issues }: { issues: ReceiptData['chain_issues'] }) {
       <Text theme={hasError ? 'danger' : 'warning'} className="_evidence-chain-title">
         {t('evidence.chain_warning_count', { count: issues.length })}
       </Text>
-      {issues.map((ci) => (
-        <div key={ci.asset_id + ci.missing} className="_evidence-chain-row">
-          {ci.level === 'error' ? '🔴' : '🟡'} [{ci.level}] {ci.message}
-        </div>
-      ))}
+      {issues.map((ci) => {
+        // 把「问题句」加粗、后段解释句保持常规：后端 message 形如
+        // "资产 X 标记为「已验证」但没有 used 事件——仅注入/召回不能支撑「验证有效」。"
+        const sep = ci.message.indexOf('——');
+        const head = sep >= 0 ? ci.message.slice(0, sep) : ci.message;
+        const tail = sep >= 0 ? ci.message.slice(sep) : '';
+        return (
+          <div key={ci.asset_id + ci.missing} className="_evidence-chain-row">
+            {ci.level === 'error' ? '🔴' : '🟡'} [{ci.level}]{' '}
+            <strong>{head}</strong>{tail}
+          </div>
+        );
+      })}
     </Alert>
   );
 }
 
-/** 单条证据事件行（展开区）。 */
+/** 单条证据事件行（展开区）。默认只给一行摘要；含 outcome/code_diff/correlation 时再包一层内层展开，避免默认铺开。 */
 function EvidenceRow({ ev }: { ev: EvidenceEvent }) {
   const { t } = useTranslation();
   const stages = stageLabel(t);
-  const tc = ev.evidence?.tool_call;
-  const tr = ev.evidence?.test_result;
+  const evd = ev.evidence;
+  const tc = evd?.tool_call;
+  const tr = evd?.test_result;
   let desc = t('evidence.label.no_evidence');
-  if (tr) desc = `[${tr.runner}] exit=${tr.exitCode} ${(tr.output ?? '').slice(0, 100)}`;
+  if (tr) desc = `[${tr.runner}] exit=${tr.exitCode} ${(tr.output ?? '').slice(0, 60)}`;
   else if (tc) desc = `${tc.bridge}/${tc.endpoint}${tc.query ? ` · query="${tc.query.slice(0, 50)}"` : ''}`;
+  // 多行证据（结果/变更/归因）默认折叠：只在用户点开这一行时展示。
+  const detail = [evd?.outcome && `结果: ${evd.outcome}`, evd?.code_diff && `diff: ${(evd.code_diff as string).slice(0, 120)}`]
+    .filter(Boolean)
+    .join('\n');
+  const corr = evd?.correlation as { heuristic?: boolean; hits?: string[] } | undefined;
+  const corrLine = corr?.heuristic && corr.hits
+    ? `归因:token-overlap[${corr.hits.slice(0, 6).join(',')}]${corr.hits.length > 6 ? ',…' : ''}（启发式非因果）`
+    : '';
+  const hasNest = Boolean(detail || corrLine);
   return (
     <div className="_evidence-row">
       <span className="_evidence-row-stage">[{stages[ev.stage] ?? ev.stage}]</span>
       <span className="_evidence-row-time">{fmtTime(ev.created_at)}</span>
       {typeof ev.turn_seq === 'number' && <span className="_evidence-row-turn">{t('evidence.label.turn', { n: ev.turn_seq })}</span>}
-      <span className="_evidence-row-desc">{desc}</span>
+      {hasNest ? (
+        <details className="_evidence-details _evidence-row-desc">
+          <summary className="_evidence-row-summary">{desc}</summary>
+          <div className="_evidence-row-detail">
+            {detail && <div className="_evidence-row-detail-line">{detail}</div>}
+            {corrLine && <div className="_evidence-row-detail-line">{corrLine}</div>}
+          </div>
+        </details>
+      ) : (
+        <span className="_evidence-row-desc">{desc}</span>
+      )}
     </div>
   );
 }
 
-/** 单张资产卡。 */
-function AssetCard({ asset }: { asset: ReceiptAsset }) {
-  const { t } = useTranslation();
+/** 把 ReceiptAsset 映射为共享 AssetCard 的 props（领域映射走 asset-domain）。 */
+function assetToCardProps(asset: ReceiptAsset, t: TFunc) {
   const eff = effMeta(t);
   const types = typeLabel(t);
   const stages = stageLabel(t);
   const m = eff[asset.effectiveness] ?? eff.reference_only;
-  const ver = asset.version ? ` v${asset.version}` : '';
-  const src = asset.source ? ` · ${t('evidence.label.source')} ${asset.source}` : '';
-  return (
-    <Card className="_evidence-card">
-      <Card.Body>
-        <div className="_evidence-card-head">
-          <span className="_evidence-card-name">
-            <Tag theme={m.theme} variant="soft" size="sm">{m.icon} {m.label}</Tag>
-            <span className="_evidence-card-title">{asset.name || asset.asset_id}{ver}{src}</span>
-          </span>
-          <Tag theme="default" variant="outlined" size="sm">
-            {types[asset.asset_type] ?? asset.asset_type}
-          </Tag>
-        </div>
-        <div className="_evidence-card-stages">
-          <span className="_evidence-label">{t('evidence.label.stage')}：</span>
-          {asset.stages.map((s, i) => (
-            <span key={s} className="_evidence-stage-chip">
-              {stages[s] ?? s}
-              {i < asset.stages.length - 1 && <span className="_evidence-stage-arrow">→</span>}
-            </span>
-          ))}
-        </div>
-        {asset.risks.length > 0 && (
-          <div className="_evidence-card-risks">
-            <span className="_evidence-label">{t('evidence.label.risk')}：</span>
-            {asset.risks.map((r) => (
-              <Tag key={r.label} theme={RISK_THEME[r.level] ?? 'default'} variant="outlined" size="sm">
-                [{r.level}] {r.label}
-                {r.detail ? `（${r.detail}）` : ''}
-              </Tag>
-            ))}
-          </div>
-        )}
-        <details className="_evidence-details">
-          <summary className="_evidence-details-summary">
-            {t('evidence.label.evidence_decision')}（{asset.events.length} 条事件）
-          </summary>
-          <div className="_evidence-details-body">
-            {asset.events.map((ev) => <EvidenceRow key={ev.id} ev={ev} />)}
-          </div>
-        </details>
-      </Card.Body>
-    </Card>
-  );
+  const stagePath = asset.stages.map((s) => stages[s] ?? s);
+  return {
+    name: asset.name || asset.asset_id,
+    version: asset.version,
+    source: asset.source,
+    typeLabel: types[asset.asset_type] ?? asset.asset_type,
+    status: { icon: m.icon, label: m.label, theme: m.theme as StatusTheme },
+    stages: stagePath,
+    risks: asset.risks,
+  };
 }
 
 export interface EvidenceDetailProps {
@@ -221,7 +178,11 @@ export default function EvidenceDetail({ receipt, loading, error, onRetry }: Evi
       {[...groups.entries()].map(([type, assets]) => (
         <div key={type} className="_evidence-group">
           <Text theme="label" className="_evidence-group-title">{t('evidence.group_count', { type, count: assets.length })}</Text>
-          {assets.map((a) => <AssetCard key={a.asset_id} asset={a} />)}
+          {assets.map((a) => (
+            <AssetCard key={a.asset_id} {...assetToCardProps(a, t)} expandSummary={`${t('evidence.label.evidence_decision')}（${a.events.length} 条事件）`}>
+              {a.events.map((ev) => <EvidenceRow key={ev.id} ev={ev} />)}
+            </AssetCard>
+          ))}
         </div>
       ))}
     </div>

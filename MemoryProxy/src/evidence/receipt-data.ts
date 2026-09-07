@@ -39,6 +39,15 @@ export interface ReceiptData {
   assets: ReceiptAsset[];
 }
 
+/** 按资产去重：各阶段触及的 distinct 资产数（回执默认口径）。事件计数见 stageCounts。 */
+export function distinctStageCounts(assets: ReceiptAsset[]): Record<AssetEventStage, number> {
+  const out = {} as Record<AssetEventStage, number>;
+  for (const a of assets) {
+    for (const s of a.stages) out[s] = (out[s] ?? 0) + 1;
+  }
+  return out;
+}
+
 /**
  * 聚合某会话的回执数据。DB 不可用 / 无事件 → 返回 null（调用方降级）。
  */
@@ -98,6 +107,9 @@ export function buildReceiptJson(data: ReceiptData): Record<string, unknown> {
     session_key: data.sessionKey,
     asset_count: data.assets.length,
     stage_counts: data.stageCounts,
+    // 两口径并存（评审边界「事件计数 vs 按资产去重」）：事件口径 stage_counts 每轮缓存重打
+    // 会累加（如 injected 虚高），distinct_stage_counts 按资产去重（= 回执正文「证据链（按资产去重）」行）。
+    distinct_stage_counts: distinctStageCounts(data.assets),
     effectiveness: data.effectiveness,
     chain_issues: data.chainIssues.map((i) => ({
       level: i.level,

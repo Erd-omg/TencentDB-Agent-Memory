@@ -13,6 +13,7 @@
 import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { refreshSessionCache, type RefreshResult } from "../../routes/session-refresh.js";
+import { mdHeader, mdSection, mdBullet, mdBlank, mdJoin } from "../md.js";
 
 function buildSuccessMessage(result: RefreshResult): string {
   const parts: string[] = [];
@@ -21,7 +22,12 @@ function buildSuccessMessage(result: RefreshResult): string {
     parts.push("Task & Agent 描述");
   }
   const scope = parts.join("、");
-  return `✅ 所有资产注入已刷新（${scope}），耗时 ${result.tookMs}ms`;
+  return mdJoin([
+    mdHeader("🔄", "所有资产注入已刷新"),
+    mdBlank(),
+    mdBullet(`已刷新：${scope}`),
+    mdBullet(`耗时：${result.tookMs}ms`),
+  ]);
 }
 
 export async function executeSync(ctx: MemCommandContext): Promise<MemCommandResult> {

@@ -102,4 +102,19 @@ describe("buildReceiptJson", () => {
     expect(assets[0]).toHaveProperty("last_stage_at");
     expect(assets[0].events).toEqual(expect.any(Array));
   });
+
+  it("distinct_stage_counts 按资产去重，与事件口径 stage_counts 两口径并存", () => {
+    const repo = getAssetEventRepo()!;
+    const asset = { assetId: "skl-1", assetType: "skill" as const };
+    repo.insert(repo.newEvent({ stage: "used", asset, sessionKey: "sess-x" }));
+    repo.insert(repo.newEvent({ stage: "injected", asset, sessionKey: "sess-x" }));
+    repo.insert(repo.newEvent({ stage: "injected", asset, sessionKey: "sess-x" })); // 缓存重打
+
+    const json = buildReceiptJson(buildReceiptData("sess-x")!);
+    const distinct = json.distinct_stage_counts as Record<string, number>;
+    const events = json.stage_counts as Record<string, number>;
+    expect(distinct.used).toBe(1);      // 按资产去重
+    expect(distinct.injected).toBe(1);  // 同资产多次注入只计 1
+    expect(events.injected).toBe(2);    // 事件口径如实累加
+  });
 });

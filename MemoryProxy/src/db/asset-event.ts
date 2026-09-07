@@ -97,6 +97,24 @@ export interface AssetEventEvidence {
     rank: number;
     threshold: number;
   };
+  /**
+   * finalize 写 validated 的 token 归因（启发式透明）。评审边界「token 归因是启发式、
+   * 非因果证明」：这里记录"为什么把验证归到它 + 命中哪些 token + 是否独有/路径锚点"，
+   * 让每次判 validated 都可在 DB/回执层审计。DB evidence_json 自由 JSON，向后兼容。
+   */
+  correlation?: {
+    type: "token-overlap";
+    /** 恒 true：归因是启发式共现，不是因果证明。 */
+    heuristic: true;
+    /** 该资产 name token ∩ diff token 的命中。 */
+    hits: string[];
+    /** 命中中属于变更文件路径 token 的（diff 真实动了与该资产同名的文件）——强锚点。 */
+    pathHits?: string[];
+    /** 命中中仅本候选名独有（未出现在其它 used&!corrected 候选名）——可归因独有词。 */
+    distinctiveHits?: string[];
+    /** 命中中与其它候选共享、且非路径锚点的泛化词（弱命中来源）。 */
+    sharedHits?: string[];
+  };
 }
 
 /** 一条持久化的资产事件（asset_event 表行）。 */

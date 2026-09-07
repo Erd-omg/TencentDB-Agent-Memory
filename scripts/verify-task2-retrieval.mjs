@@ -8,7 +8,7 @@
  *   3. asset_event 落 `selected(decision="rerank")`（dims 六维齐 / weightedScore / rank）
  *   4. kept 资产落 `injected`；selected 数 ≥ injected 数
  *   5. 预算裁剪：trimmedByBudget=true 的 selected 不落 injected
- *   6. 跨用户来源标注：cross-agent skill 的 source ≠ "self"
+ *   6. 跨 agent来源标注：cross-agent skill 的 source ≠ "self"
  *   7. 校准产物：results/task2-verification/rerank-table.json（每候选六维分 + 加权总分）
  *
  * 用法：
@@ -42,6 +42,21 @@ const TASK_ID = process.env.T2_TASK || "task-covxoq8e1r";
 const require = createRequire(join(ROOT, "MemoryProxy", "package.json"));
 const Database = require("better-sqlite3");
 const DB_PATH = process.env.PROXY_DB_PATH || join(os.homedir(), ".tdai-memory-proxy", "proxy.db");
+
+// 入选双条件运行时不变式用的阈值/topN：读本地实际运行 config.yaml，无则回退 DEFAULT（0.55/5）。
+const yamlR = require("js-yaml");
+const RUN_CFG = (() => {
+  try {
+    const raw = readFileSync(join(ROOT, "MemoryProxy", "config.yaml"), "utf8");
+    const r = yamlR.load(raw)?.retrieval;
+    return {
+      threshold: r?.rerank?.selectedThreshold ?? 0.55,
+      topN: r?.rerank?.topN ?? 5,
+    };
+  } catch {
+    return { threshold: 0.55, topN: 5 };
+  }
+})();
 
 const OUT_DIR = join(ROOT, "results", "task2-verification");
 if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
@@ -160,6 +175,12 @@ const wikiRecalled = events.filter((e) => e.asset_type === "wiki");
 if (wikiRecalled.length > 0) {
   const wikiSelected = events.filter((e) => e.asset_type === "wiki" && (e.stage === "selected" || e.stage === "injected"));
   assert(wikiSelected.length > 0 || wikiRecalled.length > 0, `wiki(文档/产品知识) 进入候选池（recalled ${wikiRecalled.length}${wikiSelected.length ? ` · 入选 ${wikiSelected.length}` : ""}）`);
+  // 诚实边界：wiki 正文由 agent 直连 KS、proxy 无回看 → wiki 资产证据链停在 recalled/selected/injected，
+  // 永不落 used/validated（确定性，硬断言；防评审问"wiki used 是否被保证"）。
+  const wikiUsedValidated = events.filter(
+    (e) => e.asset_type === "wiki" && (e.stage === "used" || e.stage === "validated"),
+  );
+  assert(wikiUsedValidated.length === 0, `wiki 资产无 used/validated 事件（proxy 不回看 KS 正文，证据链停在 injected；实际 ${wikiUsedValidated.length}）`);
 } else {
   console.log("  （本轮无 wiki 源数据 —— 需 MemoryKnowledge + 已注册 wiki；跳过 wiki 断言）");
 }
@@ -178,6 +199,20 @@ if (rerankSelected.length > 0) {
   assert(typeof ev.rerank?.rank === "number" && ev.rerank.rank >= 1, `rerank.rank ≥1（${ev.rerank?.rank}）`);
   assert(typeof ev.rerank?.threshold === "number", "rerank.threshold 为数字");
   assert(typeof ev.rerank?.trimmedByBudget === "boolean", "rerank.trimmedByBudget 为布尔");
+}
+
+// 入选双条件运行时不变式（评审边界：入选 = 归一化加权分 ≥ threshold 且 rank ≤ topN）。
+const passedRows = rerankSelected.filter((e) => JSON.parse(e.evidence_json).rerank?.passed === true);
+console.log(`  入选双条件不变式：passed=${passedRows.length} · 阈值=${RUN_CFG.threshold} · topN=${RUN_CFG.topN}`);
+if (passedRows.length > 0) {
+  assert(passedRows.length <= RUN_CFG.topN, `passed(入选) 行数 ${passedRows.length} ≤ topN ${RUN_CFG.topN}`);
+  for (const e of passedRows) {
+    const r = JSON.parse(e.evidence_json).rerank;
+    assert(r.weightedScore + 1e-6 >= RUN_CFG.threshold, `${e.asset_id} 加权分 ${r.weightedScore} ≥ threshold ${RUN_CFG.threshold}`);
+    assert(r.rank <= RUN_CFG.topN, `${e.asset_id} rank ${r.rank} ≤ topN ${RUN_CFG.topN}`);
+  }
+} else {
+  console.log("      （本轮无 passed 入选行，跳过不变式断言）");
 }
 
 // P1：注入器检索补 recalled —— 闭合 recalled ⊇ selected ⊇ injected（每个入选者都有 recalled 前置）。
@@ -201,13 +236,13 @@ for (const e of trimmed) {
   assert(!injectedIds.has(e.asset_id), `预算裁资产 ${e.asset_id} 不落 injected`);
 }
 
-// ── Step 4：跨用户来源标注 ──────────────────────────────────────────────
+// ── Step 4：跨 agent来源标注 ──────────────────────────────────────────────
 const crossUser = rerankSelected.filter((e) => e.source_tag && e.source_tag !== "self" && e.source_tag !== "team");
-console.log(`  跨用户来源候选：${crossUser.length}（source_tag：${[...new Set(rerankSelected.map((e) => e.source_tag))].join(",") || "(空)"}）`);
+console.log(`  跨 agent来源候选：${crossUser.length}（source_tag：${[...new Set(rerankSelected.map((e) => e.source_tag))].join(",") || "(空)"}）`);
 if (crossUser.length > 0) {
-  assert(true, `存在来源非 self 的跨 agent 资产（如 ${crossUser[0].source_tag}）→ 跨用户推荐可追溯`);
+  assert(true, `存在来源非 self 的跨 agent 资产（如 ${crossUser[0].source_tag}）→ 跨 agent推荐可追溯`);
 } else {
-  console.log("      ⚠ 本轮入选资产均非跨 agent（未到白名单跨 agent 候选），跨用户标注不在此轮验证");
+  console.log("      ⚠ 本轮入选资产均非跨 agent（未到白名单跨 agent 候选），跨 agent标注不在此轮验证");
 }
 
 // ── Step 5：hook_cache 块 + 校准产物 ────────────────────────────────────

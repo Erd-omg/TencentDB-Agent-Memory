@@ -249,26 +249,58 @@ const guardText = String(r7b.msg.content ?? "");
 console.log(`      mem:correct skl-nonexistent → 被拦截：${guardText.slice(0, 60).replace(/\n/g, " ")}`);
 assert(/未找到|无法纠正/.test(guardText), `不存在资产被前置校验拦截（F3 防凭空纠正）`);
 
-// ── 8. F4：mem:validate（校验全部 skill）──────────────────────────────────────
-// 用 --all：默认只校验 used/selected（P1 噪声修复），--all 全量才演示 F4 校验。
+// ── 8. F4：mem:validate（三入口同门禁）─────────────────────────────────────────
+// 防伪证收紧后：mem:validate 默认 / <id> / --all 只放行本会话 used/selected 且未纠正资产，
+// 无法再对仅召回/注入资产写 validated-无-used。这里用 --all 验证门禁一致。
 messages.push({ role: "user", content: "mem:validate --all" });
 const r8 = await send();
-console.log("\n[8] mem:validate（真实校验命令 → validated/corrected）");
+console.log("\n[8] mem:validate（真实校验命令 → validated/corrected；三入口同门禁）");
 if (r8.msg.content) console.log(`\n${String(r8.msg.content).trimEnd()}\n`);
 
-// ── 9. F4：最终回执 —— 证据链完整性提醒 ───────────────────────────────────────
-messages.push({ role: "user", content: "mem:receipt" });
+// 防伪证不变量（直查 DB）：每条 validated.asset_id ∈ 本会话 used∪selected。
+const evAfterValidate = queryEvents();
+const usedIds = new Set(evAfterValidate.filter((e) => e.stage === "used").map((e) => e.asset_id));
+const usedSelectedIds = new Set(
+  evAfterValidate.filter((e) => e.stage === "used" || e.stage === "selected").map((e) => e.asset_id),
+);
+const validatedRows = evAfterValidate.filter((e) => e.stage === "validated");
+const validatedOutside = validatedRows.filter((e) => !usedSelectedIds.has(e.asset_id));
+console.log(`      used=${usedIds.size} · used∪selected=${usedSelectedIds.size} · validated=${validatedRows.length} · 越界=${validatedOutside.length}`);
+assert(validatedOutside.length === 0, `validated ⊆ used∪selected（防伪证全入口一致；越界 ${validatedOutside.length}）`);
+
+// ── 9. F4：最终回执（技术明细 --full）—— 证据链完整性提醒 ───────────────────────
+messages.push({ role: "user", content: "mem:receipt --full" });
 const r9 = await send();
-console.log("[9] mem:receipt（最终：F4 证据链完整性校验）");
+console.log("[9] mem:receipt --full（最终：F4 证据链完整性校验，技术明细）");
 const finalReceipt = String(r9.msg.content ?? "");
 if (finalReceipt) console.log(`\n${finalReceipt.trimEnd()}\n`);
 
+// ── 9b. 默认回执（对外平实语言）断言 ────────────────────────────────────────────
+messages.push({ role: "user", content: "mem:receipt" });
+const r9b = await send();
+const plainReceipt = String(r9b.msg.content ?? "");
+console.log("\n[9b] mem:receipt（默认：对外平实语言）");
+if (plainReceipt) console.log(`\n${plainReceipt.trimEnd()}\n`);
+assert(/作用：/.test(plainReceipt) && /为什么适用：/.test(plainReceipt),
+  `默认回执含「作用/为什么适用」平实字段`);
+assert(/项已通过验证|项仅作背景参考/.test(plainReceipt), `默认回执用平实计数（N 项已通过验证 / 仅作背景参考）`);
+assert(!/归因:/.test(plainReceipt) && !/证据详情：/.test(plainReceipt) && !/召回 → 选中/.test(plainReceipt),
+  `默认回执去工程口径（无 归因/证据详情/阶段路径）`);
+assert(/mem:receipt --json/.test(plainReceipt), `默认回执附 --json 导出入口提示`);
+
 // ── 10. F4 断言 ───────────────────────────────────────────────────────────────
 console.log("[10] F4 断言（回执内容）");
+// validated-无-used 的降级展示只在本会话存在 selected-未-used 资产时出现（收紧后 validated
+// 仍可能是 selected-only → 仍触发 F4 降级）。存在才硬断言；不存在则降级展示由 receipt 单测覆盖。
+const degradeAssetIds = [...new Set(validatedRows.filter((e) => !usedIds.has(e.asset_id)).map((e) => e.asset_id))];
 const hasWarnSection = /证据链完整性提醒/.test(finalReceipt);
-assert(hasWarnSection, `回执含 ⚠️ 证据链完整性提醒 段`);
 const hasDegrade = /⚠️ 已标记验证（缺使用证据）/.test(finalReceipt);
-assert(hasDegrade, `validated-无-used 资产状态降级为 ⚠️ 已标记验证（缺使用证据）`);
+if (degradeAssetIds.length > 0) {
+  assert(hasWarnSection, `回执含 ⚠️ 证据链完整性提醒 段`);
+  assert(hasDegrade, `validated-无-used 资产（${degradeAssetIds.length} 项）状态降级为 ⚠️ 已标记验证（缺使用证据）`);
+} else {
+  console.log(`      （本会话无 selected-未-used 的 validated 资产：F4 降级展示由 receipt 单测覆盖，跳过 e2e 断言）`);
+}
 const hasToolGuideOk = /cloud-migration-tool-guide/.test(finalReceipt)
   && /召回 → 选中 → 注入 → 使用 → 已验证/.test(finalReceipt);
 assert(hasToolGuideOk, `cloud-migration-tool-guide 走完 召回→选中→注入→使用→已验证`);
@@ -285,12 +317,13 @@ const hasDecision = /决策证据：工具调用 skill-bridge\/get-by-name/.test
 assert(hasDecision, `回执展示决策证据（工具调用，C 诚实边界）`);
 
 // ── 13. 任务四 深化：Markdown 回执 + --json + <assetId> 深潜 ───────────────────
-console.log("\n[13] 任务四 深化：Markdown 折叠回执 / --json / 深潜");
+console.log("\n[13] 任务四 深化：Markdown 分组回执 / --json / 深潜");
+// --full 按资源类型分组（## Skill（N））；默认平实回执折叠 reference_only（仅背景参考（N 项））。
 const hasMarkdownGroup = /^## 📋 资产使用回执（本会话）$/m.test(finalReceipt)
   && /^## Skill（\d+）$/m.test(finalReceipt);
-assert(hasMarkdownGroup, `回执为 Markdown 分组（## 标题 + 类型分组）`);
-const hasRefCollapse = /💤 仅背景参考（\d+ 项）/.test(finalReceipt);
-assert(hasRefCollapse, `reference_only 资产默认折叠（> 💤 仅背景参考（N 项）· mem:receipt --full 展开）`);
+assert(hasMarkdownGroup, `--full 回执为 Markdown 分组（## 标题 + 类型分组）`);
+const hasRefCollapse = /💤 仅背景参考（\d+ 项）/.test(plainReceipt);
+assert(hasRefCollapse, `默认回执折叠 reference_only（💤 仅背景参考（N 项））`);
 
 messages.push({ role: "user", content: "mem:receipt --json" });
 const r13 = await send();

@@ -146,3 +146,14 @@ coverage/
 # Local-only: parity snapshots & runtime configs (never commit)
 MemoryProxy/.archive-tmp/
 z_config/
+
+# Local-only delivery & walkthrough docs (handed over offline to mentor, never pushed)
+docs/codebuddy-gui-walkthrough.md
+docs/competition-task4-understanding.md
+docs/v2.0.1-telemetry.md
+docs/delivery/task4-delivery.md
+
+# Local-only results & GUI walkthrough screenshots (shared offline, never pushed)
+results/codebuddy-live-7/
+results/cross-user/
+results/wiki-seed/

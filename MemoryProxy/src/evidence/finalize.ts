@@ -9,13 +9,16 @@
  *   1. 抓真实代码变更：`git diff HEAD`（本仓库真实 diff，非标签）。
  *   2. 跑真实测试：在仓库 cwd 下执行配置的测试命令，取**真实退出码**。
  *   3. token 相关度归因：只把与本次 diff 文本/变更文件 token 共现的 used/selected 资产
- *      判 validated（不全会话摊分）；证据记录 hit tokens + correlation="token-overlap"。
+ *      判 validated（不全会话摊分）；证据记录结构化 correlation{hits,pathHits,distinctiveHits,sharedHits}。
  *   4. 测试通过（exit 0）→ 给相关资产写 `validated` 事件，evidence 带
- *      test_result（runner/exitCode/输出尾部）+ code_diff（diff 摘要）+ outcome。
+ *      test_result（runner/exitCode/输出尾部）+ code_diff（diff 摘要）+ outcome + correlation。
  *      测试未过 → 不写 validated（诚实："有变更但未通过测试"不宣称验证有效）。
  *
- * 诚实边界：
- *   - 归因是启发式（token 共现），不是因果；未命中资产的 used 保持 ⏳待验证。
+ * 诚实边界（2026-09 边界硬化，防"大 diff / 多资产把 validated 摊到未实际使用的资产"）：
+ *   - 归因是启发式（token 共现），不是因果证明；证据带 correlation 可审计，回执展示 token-overlap。
+ *   - 只判本会话 used 资产（used 前置）；仅 selected / 已 corrected 一律跳过，防伪证。
+ *   - 保守写判据：单候选 ≥1 命中；**多 used 候选**需「独有 token ∪ 变更文件路径 token」≥1，
+ *     或 ≥2 个普通共享命中 —— 仅共享泛化词且无路径锚点 = 弱命中，不写 validated（CLI 报原因）。
  *   - 无变更（git diff HEAD 为空）→ 直接返回，不写任何 validated。
  *   - 命令在配置/显式参数指定的仓库 cwd 下执行（mem: 命令为操作者触发，信任等同 mem:validate）。
  */
@@ -92,8 +95,66 @@ export function tokenizeText(text: string): string[] {
 
 export interface CorrelatedAsset {
   asset: AssetRef;
-  /** 命中的 token（证据里记录，说明"为何把验证归到它"）。 */
+  /** 命中的 token（全量：name token ∩ diff token）。证据里记录，说明"为何把验证归到它"。 */
   hitTokens: string[];
+  /** 命中中属于变更文件路径 token 的（diff 真实动了与该资产同名域的某文件）——强锚点。 */
+  pathHits: string[];
+  /** 命中中仅本候选名独有（未出现在其它 used&!corrected 候选名）——可单独归因的独有词。 */
+  distinctiveHits: string[];
+  /** 命中中与其它候选共享、且非路径锚点的泛化词（弱命中来源，多候选下不能仅凭它判）。 */
+  sharedHits: string[];
+}
+
+/**
+ * 从 diff 输出提取**变更文件路径 token**（强锚点）。
+ * 识别 `diff --git a/… b/…` / `--- a/…` / `+++ b/…` 头，与 --stat 的 `path | N` 行。
+ * 纯函数，供单测直接断言。
+ */
+export function pathTokensFromDiff(diffText: string): Set<string> {
+  const paths: string[] = [];
+  for (const line of (diffText ?? "").split("\n")) {
+    const git = line.match(/^diff --git a\/(\S+) b\/(\S+)/);
+    if (git) { paths.push(git[1], git[2]); continue; }
+    const minus = line.match(/^--- a\/(\S+)/);
+    if (minus) { paths.push(minus[1]); continue; }
+    const plus = line.match(/^\+\+\+ b\/(\S+)/);
+    if (plus) { paths.push(plus[1]); continue; }
+    const stat = line.match(/^\s*(\S+)\s+\|/);
+    if (stat && !/\bfile changed\b/.test(line)) paths.push(stat[1]);
+  }
+  const out = new Set<string>();
+  for (const p of paths) for (const t of tokenizeText(p)) out.add(t);
+  return out;
+}
+
+/**
+ * 保守写判据（纯函数）：给定一个全命中的相关资产，判断是否值得写 validated。
+ *  - 单 used 候选：语义不变（≥ minMatches 即写，没有别的资产可摊分）。
+ *  - 多 used 候选（评审关注的大 diff / 多资产摊分场景）：
+ *      「独有 token ∪ 变更文件路径 token」≥1 → 可归因，写；
+ *      否则普通共享命中 ≥ max(minMatches, 2)（≥2 个独立共现佐证）→ 写；
+ *      仅 1 个共享泛化词且无锚点 → 弱命中，不写（防把 validated 摊给未实际使用的资产）。
+ */
+export interface CorrelationWriteContext {
+  /** 本会话 used 且未 corrected 的候选总数（共享集在其上算）。 */
+  usedCandidateCount: number;
+  minMatches: number;
+}
+export function decideCorrelationWrite(
+  c: CorrelatedAsset,
+  ctx: CorrelationWriteContext,
+): { write: boolean; reason?: string } {
+  const { usedCandidateCount, minMatches } = ctx;
+  if (usedCandidateCount <= 1) {
+    if (c.hitTokens.length >= minMatches) return { write: true };
+    return { write: false, reason: `命中 ${c.hitTokens.length} < minMatches ${minMatches}` };
+  }
+  if (c.distinctiveHits.length + c.pathHits.length >= 1) return { write: true };
+  if (c.sharedHits.length >= Math.max(minMatches, 2)) return { write: true };
+  return {
+    write: false,
+    reason: `弱命中：仅 ${c.sharedHits.length} 个共享泛化词（与其它 ${usedCandidateCount - 1} 个 used 资产共享）且无独有/变更文件锚点 → 跳过防摊分`,
+  };
 }
 
 /**
@@ -102,6 +163,9 @@ export interface CorrelatedAsset {
  *
  * 只认 used（定向读取/使用过），不认仅 selected —— 否则"被推荐但没打开"的资产也会被
  * 写 validated，触发 F4「validated 无 used」链错误（过度归因）。已 corrected 的跳过。
+ *
+ * 返回语义 = 全命中 ≥ minMatches 的相关资产（并携带 path/distinctive/shared 桶，
+ * 供 decideCorrelationWrite 做保守写判定）；本函数不改判定、不写事件。
  */
 export function correlateAssets(
   summaries: AssetStageSummary[],
@@ -110,17 +174,32 @@ export function correlateAssets(
 ): CorrelatedAsset[] {
   const { minMatches = 1, extraText } = opts;
   const diffTokens = new Set(tokenizeText(diffText));
+  const pathTokens = pathTokensFromDiff(diffText);
+  // 归因候选 = 本会话 used 且未 corrected 的资产（仅它们可能被写 validated）。
+  const candidates = summaries.filter((s) => s.stages.includes("used") && !s.stages.includes("corrected"));
+  // 共享集 = 出现在 ≥2 个候选 name token 集里的 token（多个 used 资产都有的词，
+  // 单独出现时无法证明归给谁）。即使某候选零命中，它的名字也参与共享集（共享是"名里有"）。
+  const tokenOwners = new Map<string, number>();
+  for (const s of candidates) {
+    const id = s.asset.assetId;
+    const base = [s.asset.name ?? "", extraText?.[id] ?? ""].join(" ");
+    for (const t of new Set(tokenizeText(base))) tokenOwners.set(t, (tokenOwners.get(t) ?? 0) + 1);
+  }
+  const sharedSet = new Set([...tokenOwners].filter(([, n]) => n >= 2).map(([t]) => t));
+
   const out: CorrelatedAsset[] = [];
-  for (const s of summaries) {
-    if (!s.stages.includes("used")) continue;
-    // 已纠正的资产不再参与重新归因（纠正已否定它）。
-    if (s.stages.includes("corrected")) continue;
+  for (const s of candidates) {
     const id = s.asset.assetId;
     const base = [s.asset.name ?? "", extraText?.[id] ?? ""].join(" ");
     const hitTokens = [...new Set(tokenizeText(base))].filter((t) => diffTokens.has(t));
-    if (hitTokens.length >= minMatches) {
-      out.push({ asset: s.asset, hitTokens });
-    }
+    if (hitTokens.length < minMatches) continue;
+    out.push({
+      asset: s.asset,
+      hitTokens,
+      pathHits: hitTokens.filter((t) => pathTokens.has(t)),
+      distinctiveHits: hitTokens.filter((t) => !sharedSet.has(t)),
+      sharedHits: hitTokens.filter((t) => sharedSet.has(t) && !pathTokens.has(t)),
+    });
   }
   return out;
 }
@@ -159,9 +238,13 @@ export interface TaskFinalizeOutcome {
   exitCode?: number | null;
   testOutput?: string;
   durationMs?: number;
-  /** 归因到的相关资产。 */
+  /** 归因候选（本会话 used 且未 corrected）总数——写判据用它区分单/多候选。 */
+  usedCandidateCount: number;
+  /** 归因到的相关资产（全命中 ≥ minMatches；是否真写 validated 看 decideCorrelationWrite）。 */
   correlated: CorrelatedAsset[];
-  /** 实际写了 validated 事件的资产 id（测试 exit 0 的相关资产）。 */
+  /** 相关但判"弱命中"未写 validated 的资产（评审可见：为什么没把验证归给它们）。 */
+  weakRefusals: Array<{ assetId: string; name?: string; reason?: string }>;
+  /** 实际写了 validated 事件的资产 id（测试 exit 0 且通过保守写判据的相关资产）。 */
   validatedAssetIds: string[];
 }
 
@@ -176,6 +259,8 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
     repo: args.repo,
     hasChange: false,
     correlated: [],
+    usedCandidateCount: 0,
+    weakRefusals: [],
     validatedAssetIds: [],
   };
 
@@ -206,15 +291,37 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
 
   // 4) token 相关度归因（只对 used/selected 资产）。
   const summaries = repoEvents ? repoEvents.distinctAssets(args.sessionKey) : [];
+  outcome.usedCandidateCount = summaries.filter(
+    (s) => s.stages.includes("used") && !s.stages.includes("corrected"),
+  ).length;
   outcome.correlated = correlateAssets(summaries, [diffStatRes.output, diffText].join("\n"), {
     minMatches: args.minMatches ?? 1,
   });
+  const minMatches = args.minMatches ?? 1;
 
-  // 5) 测试通过 → 给相关资产写 validated（带 code_diff/outcome/test_result）。
+  // 5) 测试通过 → 相关资产套**保守写判据**写 validated（带 correlation/code_diff/outcome/test_result）。
+  //    判"弱命中"的进 weakRefusals 不写 —— 防大 diff/多 used 资产把验证摊给未实际使用的资产。
   if (testRes.code === 0) {
     if (repoEvents) {
       const si = args.sessionInfo ?? {};
       for (const c of outcome.correlated) {
+        const dec = decideCorrelationWrite(c, { usedCandidateCount: outcome.usedCandidateCount, minMatches });
+        if (!dec.write) {
+          outcome.weakRefusals.push({
+            assetId: c.asset.assetId,
+            name: c.asset.name,
+            reason: dec.reason ?? "weak match",
+          });
+          continue;
+        }
+        const correlation: NonNullable<NonNullable<AssetEvent["evidence"]>["correlation"]> = {
+          type: "token-overlap",
+          heuristic: true,
+          hits: c.hitTokens,
+          pathHits: c.pathHits,
+          distinctiveHits: c.distinctiveHits,
+          sharedHits: c.sharedHits,
+        };
         const ev: AssetEvent["evidence"] = {
           test_result: {
             runner: args.runnerLabel ?? args.testCmd,
@@ -228,8 +335,10 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
           validator: {
             id: "task-git-diff-finalize",
             pass: true,
-            detail: `correlation=token-overlap hits=[${c.hitTokens.join(",")}]`,
+            detail: `correlation=token-overlap hits=[${c.hitTokens.join(",")}]`
+              + (c.pathHits.length ? ` path=[${c.pathHits.join(",")}]` : ""),
           },
+          correlation,
         };
         try {
           repoEvents.insert(repoEvents.newEvent({

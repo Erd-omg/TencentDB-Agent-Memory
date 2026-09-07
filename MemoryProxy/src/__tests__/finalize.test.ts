@@ -17,9 +17,12 @@ import { join } from "node:path";
 import {
   tokenizeText,
   correlateAssets,
+  pathTokensFromDiff,
+  decideCorrelationWrite,
   runTaskFinalize,
   type ExecResult,
   type ExecFn,
+  type CorrelatedAsset,
 } from "../evidence/finalize.js";
 import { getAssetEventRepo, __resetAssetEventRepoForTests } from "../db/assetEventRepo.js";
 import { __resetDbForTests } from "../db/index.js";
@@ -186,5 +189,148 @@ describe("runTaskFinalize — 端到端（注入 exec）", () => {
     expect(outcome.reason).toContain("无相对 HEAD 的代码变更");
     expect(calls.filter((c) => c === "node --test")).toHaveLength(0);
     expect(getAssetEventRepo()!.bySessionKey(SESSION, "validated")).toHaveLength(0);
+  });
+});
+
+describe("finalize 保守写判据（防大 diff / 多资产摊分）", () => {
+  const withExec = (diffStat: string, diff: string) => {
+    const calls: string[] = [];
+    const exec = makeExec(calls, { diffStat, diff });
+    return { calls, exec };
+  };
+
+  it("多 used：仅一者含独有/变更文件路径锚点 → 只写它，另一判弱命中进 weakRefusals", async () => {
+    addEvt("used", "skl-A", "cloud-migration-guide");   // guide 在变更路径 docs/guide.md → 锚点
+    addEvt("used", "skl-B", "cloud-migration-tools");   // 仅共享泛化词 migration，无锚点 → 弱命中
+    const { exec } = withExec(
+      " docs/guide.md | 4 +--\n 1 file changed",
+      [
+        "diff --git a/docs/guide.md b/docs/guide.md",
+        "--- a/docs/guide.md",
+        "+++ b/docs/guide.md",
+        "-  migration steps old",
+        "+  migration steps new (rollback order)",
+      ].join("\n"),
+    );
+    const outcome = await runTaskFinalize({
+      sessionKey: SESSION, repo: REPO, testCmd: "node --test", runnerLabel: "node --test",
+      repoEvents: getAssetEventRepo(), exec,
+    });
+
+    expect(outcome.usedCandidateCount).toBe(2);
+    expect(outcome.correlated.map((c) => c.asset.assetId).sort()).toEqual(["skl-A", "skl-B"]);
+    expect(outcome.validatedAssetIds).toEqual(["skl-A"]);           // A 有独有/路径锚点
+    expect(outcome.weakRefusals.map((w) => w.assetId)).toEqual(["skl-B"]); // B 仅共享 migration
+    expect(outcome.weakRefusals[0].reason).toContain("弱命中");
+
+    const validated = getAssetEventRepo()!.bySessionKey(SESSION, "validated");
+    expect(validated).toHaveLength(1);
+    const corr = validated[0].evidence?.correlation;
+    expect(corr?.heuristic).toBe(true);
+    expect(corr?.type).toBe("token-overlap");
+    expect(corr?.pathHits).toContain("guide");
+    expect(corr?.distinctiveHits).toContain("guide");
+  });
+
+  it("大 diff + 单泛化共享 token 且无变更文件锚点 → 相关资产都判弱命中，不写 validated", async () => {
+    addEvt("used", "skl-A", "alpha-migration-one");
+    addEvt("used", "skl-B", "beta-migration-two");
+    const { exec } = withExec(
+      " src/generated/bundle.js | 80 +----\n 1 file changed",
+      [
+        "diff --git a/src/generated/bundle.js b/src/generated/bundle.js",
+        "--- a/src/generated/bundle.js",
+        "+++ b/src/generated/bundle.js",
+        "-  // migration point 1: snapshot before acl",
+        "-  // migration point 2: apply acl",
+        "-  // migration point 3: rollback order",
+        "+  // migration point 1: snapshot before acl (revised)",
+        "+  // migration point 2: apply acl (revised)",
+        "+  // migration point 3: rollback order (revised)",
+      ].join("\n"),
+    );
+    const outcome = await runTaskFinalize({
+      sessionKey: SESSION, repo: REPO, testCmd: "node --test",
+      repoEvents: getAssetEventRepo(), exec,
+    });
+    // 两资产各只命中共享的 migration，migration 不在变更文件路径里 → 双双弱命中拒绝。
+    expect(outcome.validatedAssetIds).toEqual([]);
+    expect(outcome.weakRefusals).toHaveLength(2);
+    expect(outcome.weakRefusals.every((w) => w.reason?.includes("弱命中"))).toBe(true);
+    expect(getAssetEventRepo()!.bySessionKey(SESSION, "validated")).toHaveLength(0);
+  });
+
+  it("单 used 资产 1 token（仅 diff 正文、非路径）→ 仍判（无其它资产可摊分）", async () => {
+    addEvt("used", "skl-R", "cloud-rollback-helper");
+    const { exec } = withExec(
+      " src/state.js | 6 +--\n 1 file changed",
+      [
+        "diff --git a/src/state.js b/src/state.js",
+        "--- a/src/state.js",
+        "+++ b/src/state.js",
+        "-  // old rollback: revert window too short",
+        "+  // new rollback: revert full window",
+      ].join("\n"),
+    );
+    const outcome = await runTaskFinalize({
+      sessionKey: SESSION, repo: REPO, testCmd: "node --test",
+      repoEvents: getAssetEventRepo(), exec,
+    });
+    expect(outcome.usedCandidateCount).toBe(1);
+    expect(outcome.validatedAssetIds).toEqual(["skl-R"]);
+    expect(outcome.weakRefusals).toEqual([]);
+  });
+});
+
+describe("pathTokensFromDiff / decideCorrelationWrite（纯函数矩阵）", () => {
+  it("从 diff 头解析变更文件路径 token", () => {
+    const set = pathTokensFromDiff([
+      "diff --git a/src/windows-migration.js b/src/windows-migration.js",
+      "--- a/src/windows-migration.js",
+      "+++ b/src/windows-migration.js",
+      " src/windows-migration.js | 8 +++",
+      " 1 file changed",
+    ].join("\n"));
+    expect(set.has("windows")).toBe(true);
+    expect(set.has("migration")).toBe(true);
+    expect(set.has("js")).toBe(true);
+  });
+
+  const cand = (over: Partial<CorrelatedAsset>): CorrelatedAsset => ({
+    asset: { assetId: "skl-x", assetType: "skill", name: "x" },
+    hitTokens: ["migration"],
+    pathHits: [],
+    distinctiveHits: [],
+    sharedHits: [],
+    ...over,
+  });
+
+  it("单候选：≥ minMatches 即写", () => {
+    expect(decideCorrelationWrite(cand({ hitTokens: ["migration"] }), { usedCandidateCount: 1, minMatches: 1 }).write).toBe(true);
+    expect(decideCorrelationWrite(cand({ hitTokens: [] }), { usedCandidateCount: 1, minMatches: 1 }).write).toBe(false);
+  });
+  it("多候选：独有/路径锚点 ≥1 → 写", () => {
+    expect(decideCorrelationWrite(
+      cand({ pathHits: ["migration"], sharedHits: ["migration"] }),
+      { usedCandidateCount: 2, minMatches: 1 },
+    ).write).toBe(true);
+    expect(decideCorrelationWrite(
+      cand({ distinctiveHits: ["guide"] }),
+      { usedCandidateCount: 2, minMatches: 1 },
+    ).write).toBe(true);
+  });
+  it("多候选：仅 1 共享泛化词且无锚点 → 弱命中不写", () => {
+    const d = decideCorrelationWrite(
+      cand({ sharedHits: ["migration"], hitTokens: ["migration"] }),
+      { usedCandidateCount: 2, minMatches: 1 },
+    );
+    expect(d.write).toBe(false);
+    expect(d.reason).toContain("弱命中");
+  });
+  it("多候选：≥2 普通共享命中 → 写（独立共现佐证）", () => {
+    expect(decideCorrelationWrite(
+      cand({ sharedHits: ["migration", "windows"], hitTokens: ["migration", "windows"] }),
+      { usedCandidateCount: 2, minMatches: 1 },
+    ).write).toBe(true);
   });
 });
