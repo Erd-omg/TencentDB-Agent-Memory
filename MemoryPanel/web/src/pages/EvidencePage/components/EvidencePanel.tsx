@@ -31,7 +31,7 @@ import {
   AssetItemMeta,
   AssetItemTime,
 } from '@/components/asset/AssetListPanel';
-import EvidenceDetail from './EvidenceDetail';
+import EvidenceDetail, { renderReceiptMarkdown } from './EvidenceDetail';
 import '../styles/evidence.css';
 
 function shortKey(key: string): string {
@@ -109,6 +109,21 @@ export default function EvidencePanel() {
       .finally(() => setLoadingReceipt(false));
   }, [selected, t]);
 
+  // 导出回执：把结构化 ReceiptData 渲染成 Markdown 并下载 .md 文件。
+  const exportReceipt = useCallback(() => {
+    if (!receipt) return;
+    const md = renderReceiptMarkdown(receipt, t);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `asset-receipt-${receipt.session_key}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [receipt, t]);
+
   return (
     <div className="_memory-evidence-body">
       <AssetPageHeader
@@ -116,9 +131,14 @@ export default function EvidencePanel() {
         scope={undefined}
         subtitle={sessions.length > 0 ? t('evidence.subtitle', { count: sessions.length }) : undefined}
         actions={
-          <Button type="primary" onClick={loadSessions}>
-            {t('evidence.refresh')}
-          </Button>
+          <>
+            <Button onClick={exportReceipt} disabled={!receipt} tooltip={!receipt ? t('evidence.export.noReceipt') : undefined}>
+              {t('evidence.export')}
+            </Button>
+            <Button type="primary" onClick={loadSessions}>
+              {t('evidence.refresh')}
+            </Button>
+          </>
         }
       />
 

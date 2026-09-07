@@ -44,7 +44,8 @@ export interface ReceiptAsset {
   stages: string[];
   last_stage_at: Record<string, number>;
   effectiveness: string;
-  risks: Array<{ level: string; label: string; detail?: string }>;
+  /** 风险标签（messageKey → 前端 i18n；旧数据可能仍带 label 兜底）。 */
+  risks: Array<{ level: string; messageKey?: string; label?: string; detail?: string }>;
   events: EvidenceEvent[];
 }
 

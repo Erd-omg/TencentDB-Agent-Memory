@@ -14,7 +14,8 @@ import type { AssetEvent, AssetStageSummary } from "../db/asset-event.js";
 
 export interface AssetRisk {
   level: "low" | "medium" | "high";
-  label: string;
+  /** i18n 文案键（前端统一映射渲染，消除中英混排）；detail 保留动态文本。 */
+  messageKey: string;
   detail?: string;
 }
 
@@ -51,7 +52,7 @@ export function evaluateRisks(summary: AssetStageSummary, events: AssetEvent[]):
     const sourceLabel = rerankScores.length > 0 ? "六维加权" : "召回相关度";
     risks.push({
       level: "medium",
-      label: "低置信",
+      messageKey: "risk.low_confidence",
       detail: `${sourceLabel}最低 ${lowScore.toFixed(2)}（< ${LOW_SCORE_THRESHOLD}）`,
     });
   }
@@ -67,14 +68,14 @@ export function evaluateRisks(summary: AssetStageSummary, events: AssetEvent[]):
       (e) => (e.stage === "used" || e.stage === "injected") && e.createdAt > latestCorrectedAt,
     );
     if (reusedAfterCorrect) {
-      risks.push({ level: "high", label: "可能过期", detail: "被纠正后仍被使用/注入" });
+      risks.push({ level: "high", messageKey: "risk.possibly_stale", detail: "被纠正后仍被使用/注入" });
     }
   }
 
   // 多来源：不同 source 计数 > 1（归属不确定）。
   const sources = new Set(mine.map((e) => e.asset.source).filter((s): s is string => !!s));
   if (sources.size > 1) {
-    risks.push({ level: "low", label: "多来源", detail: `来自 ${[...sources].join(" / ")}` });
+    risks.push({ level: "low", messageKey: "risk.multi_source", detail: `来自 ${[...sources].join(" / ")}` });
   }
 
   return risks;

@@ -15,7 +15,7 @@ import { WikiOwnerLabel, WikiStatusBadge } from './wiki-ui';
 import { WikiActions } from './wiki-detail-components';
 import { useWikiSources } from '../hooks/useWikiSources';
 import { WikiDetailView } from './wiki-detail-view';
-import '@/components/asset/asset-card.css';
+import '@/components/asset/asset-card-list.css';
 import '../styles/wiki-sources-panel.css';
 
 const { scrollable } = Table.addons;

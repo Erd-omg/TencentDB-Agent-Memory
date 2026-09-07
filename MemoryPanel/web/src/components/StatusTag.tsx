@@ -6,6 +6,7 @@
  * 各资产页只负责提供「status → label/theme」的业务映射。
  */
 import { Tag } from 'tea-component';
+import './asset-status.css';
 
 export type StatusTheme = 'default' | 'success' | 'warning' | 'error';
 
@@ -26,7 +27,9 @@ export function StatusTag({
 }) {
   return (
     <span className={className ?? '_asset-status'}>
-      <Tag theme={theme} variant="soft" size="sm">
+      {/* tea-tag--unlimited-width：tea Tag 内层 span 默认 max-width:100px + ellipsis 会截断
+          状态文案（如 Evidence 汇总条的长标签），此 class 解除上限让徽章完整显示。 */}
+      <Tag theme={theme} variant="soft" size="sm" className="tea-tag--unlimited-width">
         {label}
       </Tag>
       {hint && <span className="_asset-status-hint">{hint}</span>}

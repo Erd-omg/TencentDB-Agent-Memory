@@ -11,10 +11,16 @@
 
 import type { BudgetResult, RerankedCandidate } from "./types.js";
 
-/** 字符数 → token 近似（中英混合，平均约 3 字符/token）。 */
+/**
+ * 字符数 → token 近似（分语言档，无依赖）。
+ * 中文约 1 字/token（CJK 逐字计 1），拉丁/代码约 4 字符/token（英文与代码密度近似）。
+ * 此前统一 `len/3` 对英文/代码高估 → 预算易空或过度裁剪；分档后更贴近实际。
+ */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / 3);
+  const cjk = (text.match(/[一-鿿]/g) ?? []).length;
+  const latin = text.replace(/[一-鿿]/g, " ").replace(/\s+/g, " ").trim();
+  return cjk + Math.ceil(latin.length / 4);
 }
 
 /** 单条候选的指针 token 估算：name + description + snippet。 */

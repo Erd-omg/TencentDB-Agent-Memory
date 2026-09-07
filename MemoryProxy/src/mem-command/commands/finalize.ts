@@ -6,9 +6,10 @@
  *   mem:finalize --repo <abs> [--test <cmd>]      → 显式指定仓库 / 测试命令（覆盖映射）
  *
  * 行为（detail 见 evidence/finalize.ts）：
- *   1. `git diff HEAD` 检测本仓库真实代码变更；无变更 → 诚实返回，不写 validated。
+ *   1. 变更检测走防御链 `git diff <base>`/`git diff HEAD` → 兜底 `git diff HEAD~1 HEAD`
+ *      （会话中途已提交也能抓到"最近一次 commit vs 上一次"）；无变更 → 诚实返回，不写 validated。
  *   2. 在仓库 cwd 跑配置/指定的测试命令，取**真实退出码**。
- *   3. token 相关度把本次 diff 归因到会话 used/selected 资产（证据记 hit tokens）。
+ *   3. token 相关度把本次 diff 归因到会话 used/selected 资产（token 集含资产正文/摘要，证据记 hit tokens）。
  *   4. 测试通过（exit 0）→ 相关资产写 `validated` 事件，evidence 带
  *      test_result(真退出码) + code_diff(diff 摘要) + outcome —— 补齐
  *      asset → decision/change → outcome 的 change/outcome。测试未过不写。
@@ -20,23 +21,27 @@ import { getAssetEventRepo } from "../../db/assetEventRepo.js";
 import { runTaskFinalize } from "../../evidence/finalize.js";
 import { mdHeader, mdSection, mdBullet, mdBlank, mdFootnote, mdJoin } from "../md.js";
 
-/** 解析显式参数：--repo <单token>、--test <到末尾>。 */
-function parseArgs(args: string): { repo?: string; test?: string } {
+/** 解析显式参数：--repo <单token>、--base <单token>、--test <到末尾>。 */
+function parseArgs(args: string): { repo?: string; base?: string; test?: string } {
   const trimmed = args.trim();
   if (!trimmed) return {};
   const tokens = trimmed.split(/\s+/);
   let repo: string | undefined;
+  let base: string | undefined;
   let test: string | undefined;
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] === "--repo") {
       repo = tokens[i + 1];
+      i++;
+    } else if (tokens[i] === "--base") {
+      base = tokens[i + 1];
       i++;
     } else if (tokens[i] === "--test") {
       test = tokens.slice(i + 1).join(" ").trim();
       i = tokens.length; // test 取到末尾
     }
   }
-  return { repo, test };
+  return { repo, base, test };
 }
 
 export async function executeFinalize(ctx: MemCommandContext): Promise<MemCommandResult> {
@@ -53,9 +58,10 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
   const taskId = pick(si.task_id);
   const mapping = taskId ? cfg.taskRepos[taskId] : undefined;
 
-  const { repo: repoArg, test: testArg } = parseArgs(ctx.args);
+  const { repo: repoArg, base: baseArg, test: testArg } = parseArgs(ctx.args);
   const repo = repoArg ?? mapping?.repo;
   const testCmd = testArg ?? mapping?.test;
+  const diffBase = baseArg ?? mapping?.diffBase;
 
   if (!repo) {
     const text = "❌ 无法确定目标仓库。请用 `mem:finalize --repo <abs路径>` 显式指定，"
@@ -81,6 +87,8 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     timeoutMs: cfg.timeoutMs,
     sessionInfo: si,
     repoEvents,
+    diffBase,
+    config: ctx.config,
   });
 
   // —— 输出（Markdown 统一版式；关键 token 保留供 verify-* grep）——
@@ -96,6 +104,9 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
   }
   md.push(mdBullet(`变更：${outcome.diffStat?.split("\n").pop() ?? ""}`));
+  if (outcome.diffBase) {
+    md.push(mdBullet(`diff 基准：\`${outcome.diffBase}\`（工作区空 → 会话中途已提交兜底）`));
+  }
   if (typeof outcome.exitCode === "number") {
     md.push(mdBullet(`测试：\`${outcome.testCmd}\` → exit ${outcome.exitCode}${outcome.durationMs ? `（${outcome.durationMs}ms）` : ""}`));
   }
@@ -122,6 +133,7 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     repo: outcome.repo,
     has_change: outcome.hasChange,
     reason: outcome.reason ?? null,
+    diff_base: outcome.diffBase ?? null,
     diff_stat: outcome.diffStat ?? null,
     test: outcome.testCmd ?? null,
     exit_code: outcome.exitCode ?? null,

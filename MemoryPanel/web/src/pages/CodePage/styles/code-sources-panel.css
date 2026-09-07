@@ -5,7 +5,7 @@
  * 类名冲突。
  *
  * 列表页的页面外层 / 统计条 / 工具栏 / 骨架屏 / 卡片网格等公共结构已收敛到
- * ResourcePage/components/asset-card.css（与 Wiki 页共用），此处仅保留
+ * components/asset/asset-card-list.css（与 Wiki 页共用），此处仅保留
  * Code 特有的列表差异（branch 列 / 删除按钮）与详情页样式。
  */
 

@@ -632,13 +632,14 @@ function parseFinalizeConfig(yaml: RawYamlConfig): FinalizeConfig | undefined {
   const taskRepos: Record<string, FinalizeTaskRepo> = {};
   if (f.taskRepos && typeof f.taskRepos === "object") {
     for (const [taskId, v] of Object.entries(f.taskRepos as Record<string, unknown>)) {
-      const r = v as { repo?: unknown; test?: unknown; runnerLabel?: unknown } | null | undefined;
+      const r = v as { repo?: unknown; test?: unknown; runnerLabel?: unknown; diffBase?: unknown } | null | undefined;
       if (!r || typeof r !== "object") continue;
       if (typeof r.repo !== "string" || !r.repo || typeof r.test !== "string" || !r.test) continue;
       taskRepos[taskId] = {
         repo: r.repo,
         test: r.test,
         ...(typeof r.runnerLabel === "string" && r.runnerLabel ? { runnerLabel: r.runnerLabel } : {}),
+        ...(typeof r.diffBase === "string" && r.diffBase ? { diffBase: r.diffBase } : {}),
       };
     }
   }
@@ -661,7 +662,7 @@ function parseRetrievalConfig(yaml: RawYamlConfig): RetrievalConfig | undefined 
   const def = DEFAULT_CONFIG.retrieval!;
   const wRaw = (raw.rerank?.weights ?? {}) as Record<string, unknown>;
   const num = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);
-  return {
+  const cfg: RetrievalConfig = {
     enabled: Boolean(raw.enabled),
     rerank: {
       weights: {
@@ -736,6 +737,40 @@ function parseRetrievalConfig(yaml: RawYamlConfig): RetrievalConfig | undefined 
       },
     },
   };
+  // 合法性校验：权重和/范围 fail-fast（避免静默错误导致六维加权分越界或 budget 参数畸形）。
+  const problems = validateRetrievalConfig(cfg);
+  if (problems.length > 0) {
+    throw new Error(`retrieval.rerank 配置不合法：\n  - ${problems.join("\n  - ")}`);
+  }
+  return cfg;
+}
+
+/**
+ * 六维重排参数合法性校验（纯函数，可单测）。返回问题列表（空数组 = 通过）。
+ * 权重和须 === 1（容差 1e-9）、各项 ∈ [0,1]、threshold ∈ [0,1]、topN/budget/candidateTopK/freshnessHalfLifeDays > 0。
+ */
+export function validateRetrievalConfig(cfg: RetrievalConfig): string[] {
+  const out: string[] = [];
+  const w = cfg.rerank.weights;
+  const dims: Array<keyof typeof w> = ["relevance", "credibility", "freshness", "envCompat", "historicalEffect", "tokenCost"];
+  for (const k of dims) {
+    const v = w[k];
+    if (v < 0 || v > 1) out.push(`weights.${k}=${v} 超出 [0,1]`);
+  }
+  const sum = dims.reduce((acc: number, k) => acc + w[k], 0);
+  if (Math.abs(sum - 1) > 1e-9) out.push(`六维权重和=${Number(sum.toFixed(4))} !== 1（当前叠加可能使加权分越界）`);
+  const th = cfg.rerank.selectedThreshold;
+  if (th < 0 || th > 1) out.push(`selectedThreshold=${th} 超出 [0,1]`);
+  const positive: Array<[string, number]> = [
+    ["topN", cfg.rerank.topN],
+    ["candidateTopK", cfg.rerank.candidateTopK],
+    ["budgetTokens", cfg.rerank.budgetTokens],
+    ["freshnessHalfLifeDays", cfg.rerank.freshnessHalfLifeDays],
+  ];
+  for (const [k, v] of positive) {
+    if (!(v > 0)) out.push(`${k}=${v} 须为正数`);
+  }
+  return out;
 }
 
 /**

@@ -1,0 +1,123 @@
+/**
+ * asset-card-base.css —— 共享「资产卡」AssetCard 组件的样式（Evidence 证据页等复用）。
+ *
+ * 从原 asset-card.css 拆分而来：仅保留 `._asset-card-*`（共享 AssetCard 卡片）。
+ * Wiki / Code 列表页的 `._asset-wiki-*` / `._codelist-*`（网格/骨架/表格/响应式）
+ * 已剥离到 asset-card-list.css；本文件只服务共享 <AssetCard /> 组件。
+ */
+
+/* ── 共享资产卡（AssetCard，Evidence 证据页等） ──────────────────── */
+._asset-card {
+  --card-body-padding: 16px;
+}
+/* 头部：标题 + 右侧类型 Tag。标题 flex:1 + min-width:0；默认 naturalTrunc 截断在自然断点，
+   展开后多行（break-word 优先词/空格处断行，避免词中断）。 */
+._asset-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+._asset-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tea-color-text-primary);
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+._asset-card-title-toggle {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  margin-left: 4px;
+  color: var(--tea-color-text-brand-default);
+  font-size: 11px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+._asset-card-title-toggle:hover {
+  text-decoration: underline;
+}
+._asset-card-head .tea-tag {
+  flex: 0 0 auto;
+}
+/* meta 行：有效性徽章 + 来源池，独立于标题，窄屏换行也不遮挡标题。 */
+._asset-card-meta {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+._asset-card-source {
+  font-size: 12px;
+  color: var(--tea-color-text-tertiary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+._asset-card-stages {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--tea-color-text-secondary);
+}
+._asset-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--tea-color-bg-secondary-default);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+._asset-stage-arrow {
+  margin: 0 4px;
+  color: var(--tea-color-text-tertiary);
+}
+._asset-card-risks {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+/* 风险 Tag：解除 tea 内层 span 的 max-width:100px 截断，允许完整显示/换行。 */
+._asset-card-risks .tea-tag,
+._asset-card-risks .tea-tag span {
+  white-space: normal;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+}
+._asset-card-label {
+  color: var(--tea-color-text-tertiary);
+  font-size: 12px;
+  margin-right: 2px;
+}
+._asset-card-details {
+  margin-top: 8px;
+  border-top: 1px dashed var(--tea-color-border-primary-default);
+  padding-top: 8px;
+}
+._asset-card-details-summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--tea-color-text-brand-default);
+  user-select: none;
+}
+._asset-card-details-body {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

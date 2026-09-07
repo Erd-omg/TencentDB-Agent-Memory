@@ -1,10 +1,11 @@
 /**
- * asset-card.css —— Wiki / Code 资产列表页共享的「卡片网格 + 骨架屏 + 统计条 +
+ * asset-card-list.css —— Wiki / Code 资产列表页共享的「卡片网格 + 骨架屏 + 统计条 +
  * 工具栏 + 表格行」样式。
  *
  * 原分散在 wiki-sources-panel.css（._asset-wiki-*）与 code-sources-panel.css
- * （._codelist-*）中，两者结构几乎镜像。此处合并为一份公共样式，选择器同时
- * 覆盖两组类名；各页面仅保留自己的差异化覆盖（如 code 的 mono 名称、不同断点）。
+ * （._codelist-*）中，两者结构几乎镜像；从原 asset-card.css 拆分后归为一份公共列表样式，
+ * 选择器同时覆盖两组类名；各页面仅保留自己的差异化覆盖（如 code 的 mono 名称、不同断点）。
+ * 共享 <AssetCard /> 的 `._asset-card-*` 已在 asset-card-base.css。
  */
 
 /* ============================================================
@@ -395,79 +396,4 @@
   ._codelist-skeleton-grid {
     grid-template-columns: 1fr;
   }
-}
-
-/* ── 共享资产卡（AssetCard，Evidence 证据页等） ──────────────────── */
-._asset-card {
-  --card-body-padding: 16px;
-}
-._asset-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-._asset-card-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-._asset-card-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--tea-color-text-primary);
-  overflow-wrap: anywhere;
-}
-._asset-card-stages {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--tea-color-text-secondary);
-}
-._asset-stage-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--tea-color-bg-secondary-default);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
-._asset-stage-arrow {
-  margin: 0 4px;
-  color: var(--tea-color-text-tertiary);
-}
-._asset-card-risks {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-._asset-card-label {
-  color: var(--tea-color-text-tertiary);
-  font-size: 12px;
-  margin-right: 2px;
-}
-._asset-card-details {
-  margin-top: 8px;
-  border-top: 1px dashed var(--tea-color-border-primary-default);
-  padding-top: 8px;
-}
-._asset-card-details-summary {
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--tea-color-text-brand-default);
-  user-select: none;
-}
-._asset-card-details-body {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }

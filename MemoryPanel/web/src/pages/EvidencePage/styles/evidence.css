@@ -4,7 +4,7 @@
 ._memory-evidence-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 
 /* ── 详情区（右侧） ─────────────────────────────────────────────── */
@@ -29,13 +29,15 @@
   background: var(--tea-color-bg-primary-default);
   box-shadow: var(--tea-shadow-xs);
 }
-/* 每颗状态徽章：允许换行且不截断（Tea Tag 默认 max-width 会压缩长文案） */
+/* 每颗状态徽章：允许换行且不截断（Tea Tag 内层 span 默认 max-width:100px + ellipsis 会压缩长文案）。
+   已给 StatusTag 加 tea-tag--unlimited-width；这里同时覆盖内层 span，双保险。 */
 ._evidence-summary ._asset-status {
   flex: 0 0 auto;
   min-width: 0;
 }
-._evidence-summary ._asset-status .tea-tag {
-  white-space: nowrap;
+._evidence-summary ._asset-status .tea-tag,
+._evidence-summary ._asset-status .tea-tag span {
+  white-space: normal;
   max-width: none;
   overflow: visible;
   text-overflow: clip;
@@ -67,24 +69,14 @@
 }
 
 /* ── 资产卡（已收敛到共享 components/asset/AssetCard + asset-card.css 的 ._asset-card-*） ──
- * 证据展开行仍用 class="_evidence-details"（EvidenceRow 内层折叠）。
+ * 证据展开行用 class="_evidence-details"（EvidenceRow 内层折叠）；其内层展开区用
+ * _evidence-row-summary / _evidence-row-detail（见下面 ._evidence-row）。此处不再有
+ * _evidence-details-summary / _evidence-details-body 死类名。
  */
 ._evidence-details {
   margin-top: 8px;
   border-top: 1px dashed var(--tea-color-border-primary-default);
   padding-top: 8px;
-}
-._evidence-details-summary {
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--tea-color-text-brand-default);
-  user-select: none;
-}
-._evidence-details-body {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 ._evidence-row {
   display: flex;
@@ -136,4 +128,28 @@
 ._evidence-row-detail-line {
   font-size: 12px;
   color: var(--tea-color-text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 证据行"数据缺失"弱提示（无轮次/无正文）。 */
+._evidence-row-missing {
+  color: var(--tea-color-text-tertiary);
+  font-style: italic;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* 长证据文本"展开/收起"按钮。 */
+._evidence-expand {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  margin-left: 4px;
+  color: var(--tea-color-text-brand-default);
+  font-size: 11px;
+  cursor: pointer;
+}
+._evidence-expand:hover {
+  text-decoration: underline;
 }

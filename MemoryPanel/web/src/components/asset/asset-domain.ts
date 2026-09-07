@@ -53,3 +53,17 @@ export function stageLabel(t: TFunc): Record<string, string> {
 export function fmtTime(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN', { hour12: false });
 }
+
+/** 自然断点字符：中文标点 + ASCII 标点 + 空格（技术内容用）。齐 CodeBuddy CN 回执 naturalTrunc。 */
+const NATURAL_BREAK = "，。；、！？：,.!?;: )\"'";
+
+/** 自然截断：在整个字符预算内从末尾向前找最后一个自然断点（中文/ASCII 标点、空格），
+ *  在那里截断加 …，避免硬切在词语中间；找不到断点才回退按 max 硬切。 */
+export function naturalTrunc(text: string, max = 40): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  for (let i = max - 1; i >= Math.floor(max * 0.5); i--) {
+    if (NATURAL_BREAK.includes(head[i])) return `${head.slice(0, i + 1)}…`;
+  }
+  return `${head}…`;
+}

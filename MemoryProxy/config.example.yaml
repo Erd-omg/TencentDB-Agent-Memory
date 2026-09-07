@@ -700,6 +700,8 @@ finalize:
     #   repo: "/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1"
     #   test: "node --test"
     #   runnerLabel: "node --test"
+    #   diffBase: "origin/main"      # 可选：git diff 基准；缺省走防御链 base→HEAD→HEAD~1
+    #                               #（工作区空再兜底"最近一次 commit vs 上一次"，解决会话中途已提交）
 
 # ── 任务三 validated/corrected 验证器 ──────────────────────────────────────
 # 资产验证（mem:validate）：按资产类型把校验命令真实执行，exit 0 → validated、

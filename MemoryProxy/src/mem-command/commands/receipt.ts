@@ -162,13 +162,22 @@ function plainEffectivenessLines(eff: Record<AssetEffectiveness, number>): strin
   return [buckets.join(" · "), ...honestyLines];
 }
 
+/** 风险 messageKey → 本地化词（后端已返回 level+messageKey，文案在此统一映射，消除中英混排）。 */
+const RISK_WORD: Record<string, string> = {
+  "risk.low_confidence": "置信度",
+  "risk.possibly_stale": "时效",
+  "risk.multi_source": "多来源",
+};
+function riskWord(messageKey: string): string {
+  return RISK_WORD[messageKey] ?? messageKey;
+}
+
 /** A5 平实风险 —— 实数 + 标未检测。 */
 function plainRisk(asset: ReceiptAsset): string {
   const parts: string[] = [];
   for (const r of asset.risks) {
     const icon = r.level === "high" ? "🔴" : r.level === "medium" ? "🟠" : "🟡";
-    const label = r.label === "可能过期" ? "时效" : r.label === "低置信" ? "置信度" : r.label;
-    parts.push(`${icon} ${label}${r.detail ? `（${r.detail}）` : ""}`);
+    parts.push(`${icon} ${riskWord(r.messageKey)}${r.detail ? `（${r.detail}）` : ""}`);
   }
   // 权限 / 环境：能确认则给，否则诚实标未检测。
   const r = rerankFor(asset);
@@ -363,7 +372,7 @@ function assetCardLines(asset: ReceiptAsset, events: AssetEvent[], mode: "plain"
     lines.push(`- 更新时间：${updatedAtFor(asset)}`);
     lines.push(`- 有效性：${EFFECTIVENESS_META[asset.effectiveness].icon} ${EFFECTIVENESS_META[asset.effectiveness].label}`);
     if (asset.risks.length > 0) {
-      lines.push(`- 风险：${asset.risks.map((r) => `\`[${r.level}] ${r.label}${r.detail ? `（${r.detail}）` : ""}\``).join("；")}`);
+      lines.push(`- 风险：${asset.risks.map((r) => `\`[${r.level}] ${riskWord(r.messageKey)}${r.detail ? `（${r.detail}）` : ""}\``).join("；")}`);
     }
     lines.push(`- 使用位置：${usageLocationFor(asset)}`);
     const decision = decisionExcerptFor(asset.asset_id, events);

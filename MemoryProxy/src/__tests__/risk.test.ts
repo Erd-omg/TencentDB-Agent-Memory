@@ -30,15 +30,15 @@ describe("evaluateRisks", () => {
     const risks = evaluateRisks(summary(["recalled"]), [
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.3 } }),
     ]);
-    expect(risks.map((r) => r.label)).toContain("低置信");
-    expect(risks.find((r) => r.label === "低置信")?.level).toBe("medium");
+    expect(risks.map((r) => r.messageKey)).toContain("risk.low_confidence");
+    expect(risks.find((r) => r.messageKey === "risk.low_confidence")?.level).toBe("medium");
   });
 
   it("score 高于阈值 → 无低置信风险", () => {
     const risks = evaluateRisks(summary(["recalled"]), [
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.82 } }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("低置信");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.low_confidence");
   });
 
   it("被纠正后仍被使用 → 可能过期（high）", () => {
@@ -46,7 +46,7 @@ describe("evaluateRisks", () => {
       evt("corrected", { createdAt: 200 }),
       evt("used", { createdAt: 300 }),
     ]);
-    const stale = risks.find((r) => r.label === "可能过期");
+    const stale = risks.find((r) => r.messageKey === "risk.possibly_stale");
     expect(stale).toBeDefined();
     expect(stale?.level).toBe("high");
   });
@@ -56,7 +56,7 @@ describe("evaluateRisks", () => {
       evt("used", { createdAt: 100 }),
       evt("corrected", { createdAt: 200 }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("可能过期");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.possibly_stale");
   });
 
   it("多来源 → 多来源风险（low）", () => {
@@ -64,7 +64,7 @@ describe("evaluateRisks", () => {
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", source: "self" } }),
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", source: "team" } }),
     ]);
-    const multi = risks.find((r) => r.label === "多来源");
+    const multi = risks.find((r) => r.messageKey === "risk.multi_source");
     expect(multi).toBeDefined();
     expect(multi?.level).toBe("low");
   });
@@ -82,7 +82,7 @@ describe("evaluateRisks", () => {
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.0 } }),
       evt("used", { createdAt: 200 }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("低置信");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.low_confidence");
   });
 
   it("已验证（validated）的资产即使召回分低也不再标低置信（避免误报）", () => {
@@ -90,7 +90,7 @@ describe("evaluateRisks", () => {
       evt("recalled", { asset: { assetId: "skl-1", assetType: "skill", score: 0.0 } }),
       evt("validated", { createdAt: 200 }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("低置信");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.low_confidence");
   });
 
   it("重排入选（selected decision=rerank）用归一化加权分判低置信——加权≥阈值不标，即使召回分低", () => {
@@ -104,7 +104,7 @@ describe("evaluateRisks", () => {
         },
       }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("低置信");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.low_confidence");
   });
 
   it("重排入选但加权分仍低于阈值 → 标低置信（detail 标注口径为六维加权）", () => {
@@ -116,7 +116,7 @@ describe("evaluateRisks", () => {
         },
       }),
     ]);
-    const low = risks.find((r) => r.label === "低置信");
+    const low = risks.find((r) => r.messageKey === "risk.low_confidence");
     expect(low).toBeDefined();
     expect(low?.detail).toContain("六维加权最低 0.30");
   });
@@ -129,7 +129,7 @@ describe("evaluateRisks", () => {
         evidence: { decision: "direct-read", tool_call: { bridge: "skill-bridge", endpoint: "get-by-name", httpStatus: 200 } },
       }),
     ]);
-    const low = risks.find((r) => r.label === "低置信");
+    const low = risks.find((r) => r.messageKey === "risk.low_confidence");
     expect(low).toBeDefined();
     expect(low?.detail).toContain("召回相关度最低 0.30");
   });
@@ -141,7 +141,7 @@ describe("evaluateRisks", () => {
       evt("used", { createdAt: 300 }),
       evt("corrected", { createdAt: 400 }),
     ]);
-    expect(risks.map((r) => r.label)).not.toContain("可能过期");
+    expect(risks.map((r) => r.messageKey)).not.toContain("risk.possibly_stale");
   });
 
   it("可能过期：末次纠正之后仍被使用 → 标过期（high）", () => {
@@ -151,7 +151,7 @@ describe("evaluateRisks", () => {
       evt("corrected", { createdAt: 400 }),
       evt("used", { createdAt: 500 }),
     ]);
-    const stale = risks.find((r) => r.label === "可能过期");
+    const stale = risks.find((r) => r.messageKey === "risk.possibly_stale");
     expect(stale).toBeDefined();
     expect(stale?.level).toBe("high");
   });

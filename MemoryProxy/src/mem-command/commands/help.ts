@@ -79,6 +79,9 @@ exit 0 → 落 \`validated\` 事件；非 0 → 落 \`corrected\` 事件（资�
 
 - 无参数：按会话 task_id 查 \`config.finalize.taskRepos\` 定位仓库。
 - \`mem:finalize --repo <abs路径> --test <命令>\`：显式指定（覆盖映射）。
+- \`mem:finalize --base <ref>\`：显式 git diff 基准（如 \`origin/main\`）。缺省走防御链
+  \`git diff HEAD\` → 工作区空则兜底 \`git diff HEAD~1 HEAD\`（会话中途已提交也能抓到变更）。
+  也可在 \`config.finalize.taskRepos.\<task\>.diffBase\` 配置。
 - 诚实边界：无代码变更 / 测试未通过 → 不写 validated（有变更但未过测试不宣称验证有效）。
 
 ---

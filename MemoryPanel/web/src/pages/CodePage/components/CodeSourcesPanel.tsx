@@ -14,7 +14,7 @@ import { formatRepoName, formatShortTime, isValidGitHttpUrl, type ScopeTab, type
 import { CodeOwnerLabel, statusLabel } from './code-ui';
 import { useCodeSources } from '../hooks/useCodeSources';
 import { CodeDetailView } from './code-detail-view';
-import '@/components/asset/asset-card.css';
+import '@/components/asset/asset-card-list.css';
 import '../styles/code-sources-panel.css';
 
 const { scrollable } = Table.addons;

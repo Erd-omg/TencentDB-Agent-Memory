@@ -617,6 +617,11 @@ export interface FinalizeTaskRepo {
   test: string;
   /** 证据里 test_result.runner 标签（缺省用 test 命令）。 */
   runnerLabel?: string;
+  /**
+   * git diff 基准（显式 ref，如 "origin/main"）。缺省走防御链 base→HEAD→HEAD~1
+   * （工作区空再兜底"最近一次 commit vs 上一次"，解决会话中途已提交导致 git diff HEAD 为空）。
+   */
+  diffBase?: string;
 }
 
 export interface FinalizeConfig {

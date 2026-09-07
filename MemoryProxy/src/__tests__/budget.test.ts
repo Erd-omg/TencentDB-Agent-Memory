@@ -36,8 +36,8 @@ describe("estimateTokens", () => {
 describe("candidateTokenEstimate", () => {
   it("按 name+desc+snippet 估算", () => {
     const c = makeCand({ id: "a", rank: 1, passed: true, desc: "1234567890" });
-    // name("a") + " " + desc(10) = 12 chars → 4 tokens（snippet 空）
-    expect(candidateTokenEstimate(c)).toBe(4);
+    // name("a") + " " + desc(10) = 12 latin chars → ceil(12/4)=3 tokens（snippet 空；中文按 1 字/token）
+    expect(candidateTokenEstimate(c)).toBe(3);
   });
 });
 
@@ -53,7 +53,7 @@ describe("trimByBudget", () => {
   });
 
   it("贪心按 rank：预算内保留、超出裁剪", () => {
-    // 每条 ≈4 tokens：预算 8 → 保留前 2，第 3 条被裁
+    // 每条 ≈3 tokens（新估算）：预算 8 → 保留前 2（3+3=6），第 3 条 6+3=9 >8 被裁
     const cands = [
       makeCand({ id: "a", rank: 1, passed: true }),
       makeCand({ id: "b", rank: 2, passed: true }),

@@ -2,7 +2,7 @@
  * wiki-sources-panel.css —— Wiki 资产页样式。
  *
  * 列表页的页面外层 / 统计条 / 工具栏 / 骨架屏 / 卡片网格等公共结构已收敛到
- * ResourcePage/components/asset-card.css（与 Code 页共用），此处仅保留
+ * components/asset/asset-card-list.css（与 Code 页共用），此处仅保留
  * Wiki 详情页（_wiki-detail-*）特有样式与差异化覆盖。
  */
 
