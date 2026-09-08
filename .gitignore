@@ -111,9 +111,7 @@ MemoryCore/scripts/tests/
 # Backup files
 *.bak
 
-# Local-only archive (A/B measurement, Issue #120): kept locally, never pushed
-# (incl. stage telemetry dirs, measurement report, and stage-run scripts)
-results/archive/
+# Local-only archive stage-run scripts (kept locally, never pushed)
 scripts/archive/
 
 # self-implement-wiki e2e 产物（人工查看用，不入库）
@@ -155,7 +153,5 @@ docs/delivery/task4-delivery.md
 # Local-only design docs for Task 1/5/6 (kept locally; decide on their own branches)
 docs/design-156.md
 
-# Local-only results & GUI walkthrough screenshots (shared offline, never pushed)
-results/codebuddy-live-7/
-results/cross-user/
-results/wiki-seed/
+# Local-only results (verification artifacts & GUI walkthrough screenshots, shared offline, never pushed)
+results/
