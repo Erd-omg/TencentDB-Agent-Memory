@@ -1,6 +1,0 @@
-corrected|1
-injected|18
-recalled|6
-selected|2
-used|2
-validated|1

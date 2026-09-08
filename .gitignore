@@ -111,10 +111,9 @@ MemoryCore/scripts/tests/
 # Backup files
 *.bak
 
-# Local-only archive (A/B measurement, Issue #120): stage telemetry dirs,
-# measurement report, and stage-run scripts — kept locally, never pushed
-results/archive/stage-*/
-results/archive/runtime-measurement-report.md
+# Local-only archive (A/B measurement, Issue #120): kept locally, never pushed
+# (incl. stage telemetry dirs, measurement report, and stage-run scripts)
+results/archive/
 scripts/archive/
 
 # self-implement-wiki e2e 产物（人工查看用，不入库）
