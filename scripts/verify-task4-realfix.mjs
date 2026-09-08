@@ -42,8 +42,12 @@ const TEAM = process.env.T2_TEAM || "team-coudtbobez";
 const AGENT_ID = process.env.T2_AGENT || "agt-coudeqdh9q";
 const TASK_ID = process.env.T2_TASK || "task-covxoq8e1r";
 
-// 夹具仓库（真实业务代码 + node:test 单测 + 预埋 bug）。
-const FIX_REPO = process.env.FIX_REPO || "/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1";
+// 夹具仓库（真实业务代码 + node:test 单测 + 预埋 bug）。FIX_REPO 指向本机夹具路径，运行前必须设置。
+const FIX_REPO = process.env.FIX_REPO || "";
+if (!FIX_REPO) {
+  console.error("❌ verify-task4-realfix: 请设置环境变量 FIX_REPO 指向夹具仓库（含预埋 bug 的迁移工具 v1）。");
+  process.exit(2);
+}
 // 修复后的规范实现（由本脚本"施加"，代表按 postmortem 修正的顺序）。
 const FIXED_SRC = join(ROOT, "scripts", "task4-realfix", "fixed-src-windows-migration.js");
 

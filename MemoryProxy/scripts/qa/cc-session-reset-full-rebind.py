@@ -108,9 +108,10 @@ def spawn_cc(cwd, log_path, timeout):
     env["TERM"] = "xterm-256color"
     env["CLAUDE_CONFIG_DIR"] = os.path.expanduser("~/.claude-inter")
     env["CLAUDE_DISABLE_UPDATE_CHECK"] = "1"
-    # Ensure PATH includes claude
-    if "/data/home/jzhizhuang/.local/bin" not in env.get("PATH", ""):
-        env["PATH"] = "/data/home/jzhizhuang/.local/bin:" + env.get("PATH", "")
+    # Ensure PATH includes claude (resolve ~ for the current user)
+    local_bin = os.path.expanduser("~/.local/bin")
+    if local_bin not in env.get("PATH", ""):
+        env["PATH"] = local_bin + ":" + env.get("PATH", "")
 
     child = pexpect.spawn(
         "claude",

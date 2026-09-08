@@ -697,7 +697,7 @@ finalize:
   taskRepos:
     # 示例：云主机迁移工具 v1（业务夹具仓库）
     # task-covxoq8e1r:
-    #   repo: "/Users/erdomg/Desktop/Agent-Memory/migration-tool-v1"
+    #   repo: "~/migration-tool-v1"
     #   test: "node --test"
     #   runnerLabel: "node --test"
     #   diffBase: "origin/main"      # 可选：git diff 基准；缺省走防御链 base→HEAD→HEAD~1
