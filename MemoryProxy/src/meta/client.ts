@@ -215,6 +215,74 @@ export interface ListAccessibleAssetsInput {
   includeCandidates?: boolean;
 }
 
+/**
+ * /v3/meta/asset/create 请求入参（任务六候选资产生成）。
+ *
+ * 候选资产默认 `status=candidate`（design-156.md §4.1），审核 apply 时再转 approved。
+ * asset_type 统一 `skill`（可复用 SOP），语义桶（失败经验/历史方案等）由正文
+ * 关键词经 categorizeSkill 自动归类，不在此处表达。
+ */
+export interface CreateAssetInput {
+  asset_id: string;
+  team_id: string;
+  asset_type: string;
+  name: string;
+  owner_user_id: string;
+  /** 必填：资产来源（`task`/`session`/`document`/`code`/`manual` 等）。 */
+  source_type: string;
+  description?: string;
+  source_ref?: string;
+  visibility?: string;
+  /** 缺省 candidate —— 自动生成内容不得直接成为权威资产。 */
+  status?: string;
+  confidence?: number;
+  content_ref?: string;
+  /** JSON 字符串：applicability/risk/evidence/bucket 等扩充元数据（design-156.md §6.4）。 */
+  metadata_json?: string;
+}
+
+/** /v3/meta/asset/update 请求入参（审核 apply/reject 状态流转）。 */
+export interface UpdateAssetPatch {
+  name?: string;
+  description?: string;
+  visibility?: string;
+  status?: string;
+  confidence?: number;
+  content_ref?: string;
+  version?: number;
+  source_ref?: string;
+  metadata_json?: string;
+}
+
+/** /v3/meta/asset/list 请求入参（审核 list，按 status 过滤候选）。 */
+export interface ListAssetsInput {
+  team_id: string;
+  asset_type?: string;
+  status?: string;
+  owner_user_id?: string;
+  visibility?: string;
+}
+
+/** /v3/meta/asset/list 返回的单条资产（含 status，审核页据此展示候选/approved）。 */
+export interface AssetEntity {
+  asset_id: string;
+  team_id: string;
+  asset_type: string;
+  name?: string;
+  description?: string | null;
+  owner_user_id?: string;
+  visibility?: string;
+  status?: string;
+  source_type?: string;
+  source_ref?: string;
+  confidence?: number;
+  version?: number;
+  created_at?: string;
+  updated_at?: string;
+  metadata_json?: string | null;
+  [key: string]: unknown;
+}
+
 // ── NotFoundError ────────────────────────────────────────────────────────────
 
 export class NotFoundError extends Error {
@@ -371,6 +439,72 @@ export class MetadataClient {
       },
       LIST_PAGE_SIZE,
     );
+  }
+
+  /**
+   * Create a team asset（任务六候选资产生成入口）。
+   *
+   * 候选资产默认 `status=candidate`（design-156.md §4.1），审核 apply 时再转 approved。
+   * `asset_id` 由调用方指定（候选生成器生成 `cand-` 前缀 id），便于审核 apply 后溯源。
+   */
+  async createAsset(input: CreateAssetInput): Promise<AssetEntity> {
+    const body: Record<string, unknown> = {
+      asset_id: input.asset_id,
+      team_id: input.team_id,
+      asset_type: input.asset_type,
+      name: input.name,
+      owner_user_id: input.owner_user_id,
+      source_type: input.source_type,
+    };
+    if (input.description !== undefined) body.description = input.description;
+    if (input.source_ref !== undefined) body.source_ref = input.source_ref;
+    if (input.visibility !== undefined) body.visibility = input.visibility;
+    if (input.status !== undefined) body.status = input.status;
+    if (input.confidence !== undefined) body.confidence = input.confidence;
+    if (input.content_ref !== undefined) body.content_ref = input.content_ref;
+    if (input.metadata_json !== undefined) body.metadata_json = input.metadata_json;
+    return this.fetch<AssetEntity>("/v3/meta/asset/create", body);
+  }
+
+  /**
+   * Patch a team asset（审核 apply/reject 状态流转）。
+   *
+   * 审核 apply：status candidate→approved；reject：candidate→failed。
+   * 内核以 asset_id 定位，caller 需有 write 权限（内核 401/403 兜底）。
+   */
+  async updateAsset(assetId: string, patch: UpdateAssetPatch): Promise<AssetEntity> {
+    const body: Record<string, unknown> = { asset_id: assetId };
+    if (patch.name !== undefined) body.name = patch.name;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.visibility !== undefined) body.visibility = patch.visibility;
+    if (patch.status !== undefined) body.status = patch.status;
+    if (patch.confidence !== undefined) body.confidence = patch.confidence;
+    if (patch.content_ref !== undefined) body.content_ref = patch.content_ref;
+    if (patch.version !== undefined) body.version = patch.version;
+    if (patch.source_ref !== undefined) body.source_ref = patch.source_ref;
+    if (patch.metadata_json !== undefined) body.metadata_json = patch.metadata_json;
+    return this.fetch<AssetEntity>("/v3/meta/asset/update", body);
+  }
+
+  /**
+   * List team assets（审核 list，按 status 过滤候选）。
+   *
+   * 走内核 `/v3/meta/asset/list`（assetListSchema）—— 这是**审核专用**接口，
+   * 与 `listAccessibleAssets`（`/v3/meta/asset/list-accessible`，受 §4.3 门控 +
+   * ACL 过滤）**职责分离**：
+   *   - 本方法：status 缺省时返回该 team 的**全部状态**资产（含 candidate/draft），
+   *     供 mem:review list/show 读到待审核候选（审核闭环成立的关键）。
+   *   - listAccessibleAssets：candidate/draft 对消费侧（注入/检索/回执/面板）
+   *     不可见（design-156.md §4.3）。
+   * 分页聚合（与其它 list* 一致）。
+   */
+  async listAssets(input: ListAssetsInput): Promise<AssetEntity[]> {
+    const body: Record<string, unknown> = { team_id: input.team_id };
+    if (input.asset_type !== undefined) body.asset_type = input.asset_type;
+    if (input.status !== undefined) body.status = input.status;
+    if (input.owner_user_id !== undefined) body.owner_user_id = input.owner_user_id;
+    if (input.visibility !== undefined) body.visibility = input.visibility;
+    return this.fetchAll<AssetEntity>("/v3/meta/asset/list", body, LIST_PAGE_SIZE);
   }
 
   /**

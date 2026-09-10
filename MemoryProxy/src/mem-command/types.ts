@@ -51,7 +51,9 @@ export type MemCommandName =
   | "validate"
   | "receipt"
   | "correct"
-  | "finalize";
+  | "finalize"
+  | "propose"
+  | "review";
 
 export interface MemCommandResult {
   success: boolean;

@@ -18,6 +18,11 @@ const HELP_TEXT = `## 支持的 mem: 命令
 | \`mem:validate [--all|资产id]\` | 真实校验资产（跑校验命令）：默认 used/selected，--all 全量；exit 0 → validated |
 | \`mem:correct <资产id> [原因]\` | 用户/评审主动纠正资产：落 corrected 事件（evidence.source=user） |
 | \`mem:finalize [--repo <路径>] [--test <命令>]\` | 任务结束 git-diff 关联：抓真实代码 diff + 跑真实测试 → 给相关资产写 validated（真退出码 + change/outcome） |
+| \`mem:propose [task_id]\` | 手动触发候选资产生成（任务经验回流）：从会话证据链提炼候选（candidate），待审核 |
+| \`mem:review list [--status=…]\` | 列出候选/已批准/已拒绝资产（缺省 candidate） |
+| \`mem:review show <资产id>\` | 查看候选资产来源/证据/正文 |
+| \`mem:review apply <资产id>\` | 批准候选（candidate → approved，进入权威资产库） |
+| \`mem:review reject <资产id> [原因]\` | 拒绝候选（candidate → failed，保留审计） |
 | \`mem:help\` | 显示本帮助 |
 
 ---
@@ -103,6 +108,10 @@ mem:validate skl-xxx
 mem:correct skl-xxx 命令过时，需要更新
 mem:finalize
 mem:finalize --repo /path/to/repo --test "node --test"
+mem:propose
+mem:review list
+mem:review apply cand-xxx
+mem:review reject cand-xxx 已过时
 mem:session-reset
 mem:help
 \`\`\`

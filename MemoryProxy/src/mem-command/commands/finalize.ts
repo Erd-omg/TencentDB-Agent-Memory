@@ -21,6 +21,23 @@ import { getAssetEventRepo } from "../../db/assetEventRepo.js";
 import { runTaskFinalize } from "../../evidence/finalize.js";
 import { mdHeader, mdSection, mdBullet, mdBlank, mdFootnote, mdJoin } from "../md.js";
 
+/**
+ * 任务六回流钩子（fire-and-forget）：finalize exit 0 后自动生成候选资产。
+ * 失败静默（候选生成绝不阻塞/破坏 finalize 主流程），仅 console.warn。
+ */
+function maybeAutoPropose(ctx: MemCommandContext): void {
+  const cfg = ctx.config.finalize;
+  if (!cfg?.autoPropose) return;
+  const si = ctx.sessionInfo ?? {};
+  const pick = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const teamId = pick(si.team_id);
+  const userId = pick(si.user_id);
+  if (!teamId || !userId) return;
+  import("./propose.js")
+    .then(({ executePropose }) => executePropose(ctx))
+    .catch((err) => console.warn(`[finalize] auto-propose failed: ${(err as Error).message}`));
+}
+
 /** 解析显式参数：--repo <单token>、--base <单token>、--test <到末尾>。 */
 function parseArgs(args: string): { repo?: string; base?: string; test?: string } {
   const trimmed = args.trim();
@@ -115,8 +132,9 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     md.push(mdBullet("本会话 used/selected 资产与本次 diff 无 token 共现，未写 validated（留 ⏳待验证）。"));
   } else if (outcome.exitCode === 0) {
     const nWrite = outcome.validatedAssetIds.length;
+    const nContrib = outcome.contributedAssetIds.length;
     const nWeak = outcome.weakRefusals.length;
-    md.push(mdBullet(`相关 ${outcome.correlated.length} 项 → 写 validated ${nWrite} 项（真测试通过）${nWeak ? ` · 弱命中跳过 ${nWeak} 项` : ""}`));
+    md.push(mdBullet(`相关 ${outcome.correlated.length} 项 → 写 validated ${nWrite} 项（真测试通过） · contributed ${nContrib} 项（证据链终点）${nWeak ? ` · 弱命中跳过 ${nWeak} 项` : ""}`));
     for (const c of outcome.correlated) {
       const weak = outcome.weakRefusals.find((w) => w.assetId === c.asset.assetId);
       if (weak) {
@@ -149,8 +167,15 @@ export async function executeFinalize(ctx: MemCommandContext): Promise<MemComman
     })),
     weak_refusals: outcome.weakRefusals,
     validated: outcome.validatedAssetIds,
+    contributed: outcome.contributedAssetIds,
   };
 
   const messageText = mdJoin(md);
+
+  // 任务六回流钩子：exit 0 且写了 validated/contributed 时，fire-and-forget 生成候选资产。
+  if (outcome.exitCode === 0 && outcome.validatedAssetIds.length > 0) {
+    maybeAutoPropose(ctx);
+  }
+
   return { success: true, messageText, data, response: buildMemResponse(messageText, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
 }

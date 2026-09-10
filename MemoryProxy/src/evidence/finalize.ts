@@ -366,6 +366,8 @@ export interface TaskFinalizeOutcome {
   weakRefusals: Array<{ assetId: string; name?: string; reason?: string }>;
   /** 实际写了 validated 事件的资产 id（测试 exit 0 且通过保守写判据的相关资产）。 */
   validatedAssetIds: string[];
+  /** 实际写了 contributed 事件的资产 id（validated 写成功的同一批，证据链终点）。 */
+  contributedAssetIds: string[];
 }
 
 /**
@@ -383,6 +385,7 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
     usedCandidateCount: 0,
     weakRefusals: [],
     validatedAssetIds: [],
+    contributedAssetIds: [],
   };
 
   // 1) 变更检测：git status + 防御链选基准（base→HEAD→HEAD~1）。无变更 → 无可归因，早退。
@@ -489,9 +492,34 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
             evidence: ev,
           }));
           outcome.validatedAssetIds.push(c.asset.assetId);
+          // 证据链终点（任务五 §5.1）：validated 写成功后，同一资产追加 contributed。
+          // 严格判据已由 decideCorrelationWrite 保证（used 前置 + 独有/路径/共享锚点 ≥ 阈值），
+          // 且本循环只在 exit 0 分支内 → contributed 只在「真测试通过 + 通过保守归因」时写入。
+          repoEvents.insert(repoEvents.newEvent({
+            stage: "contributed",
+            asset: c.asset,
+            sessionKey: args.sessionKey,
+            sessionId: pick(si.session_id),
+            taskId: pick(si.task_id),
+            agentId: pick(si.agent_id),
+            teamId: pick(si.team_id),
+            userId: pick(si.user_id),
+            evidence: {
+              outcome: `资产对本任务产生可验证贡献（测试 exit 0 + 保守归因通过）`,
+              test_result: ev.test_result,
+              code_diff: ev.code_diff,
+              validator: {
+                id: "task-contributed",
+                pass: true,
+                detail: `used→validated→contributed 链闭合（correlation=token-overlap）`,
+              },
+              correlation,
+            },
+          }));
+          outcome.contributedAssetIds.push(c.asset.assetId);
         } catch (err) {
           // 单条失败不阻断
-          console.warn(`[finalize] validated insert failed (${c.asset.assetId}): ${(err as Error).message}`);
+          console.warn(`[finalize] validated/contributed insert failed (${c.asset.assetId}): ${(err as Error).message}`);
         }
       }
     }
@@ -542,7 +570,8 @@ export function maybeRunAutoFinalize(
       .then((o) => {
         console.log(
           `[finalize] auto task=${taskId} change=${o.hasChange} correlated=${o.correlated.length} `
-          + `validated=${o.validatedAssetIds.length} exit=${o.exitCode ?? "-"}${o.reason ? ` reason=${o.reason}` : ""}`,
+          + `validated=${o.validatedAssetIds.length} contributed=${o.contributedAssetIds.length} `
+          + `exit=${o.exitCode ?? "-"}${o.reason ? ` reason=${o.reason}` : ""}`,
         );
       })
       .catch((err: unknown) => {

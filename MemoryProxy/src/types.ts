@@ -637,6 +637,12 @@ export interface FinalizeConfig {
   autoOnCompletion?: boolean;
   /** task_id → 目标仓库映射（mem:finalize 无参数时按会话 task 查表）。 */
   taskRepos: Record<string, FinalizeTaskRepo>;
+  /**
+   * 任务六「经验回流」自动候选生成（design-156.md §8.1/§10 reflection.autoPropose）：
+   * finalize exit 0 后自动从会话证据链提炼候选资产（status=candidate），fire-and-forget。
+   * 默认 false —— 需显式开启，避免候选生成噪音。手动触发用 mem:propose。
+   */
+  autoPropose?: boolean;
 }
 
 /**
