@@ -779,7 +779,7 @@ interface ImportMessage {
   ts?: number;
   /** 该 assistant 消息是否含 tool_use/tool_calls（中间态，非 final answer）。用于对齐 proxy 的 isFinalAnswer 切分。 */
   hasToolUse?: boolean;
-  /** skill 链路结构化字段：core /v3/skill/conversation/add 要求 tool_call/tool_result 必须带 tool_call_id（配对锚点）。 */
+  /** skill 链路结构化字段：core /v3/skill/extract 要求 tool_call/tool_result 必须带 tool_call_id（配对锚点）。 */
   tool_call_id?: string;
   tool_name?: string;
   /** 来源记录序号，用于 memory 链路还原成"每条记录一条扁平消息"的旧行为。 */
@@ -986,78 +986,64 @@ async function uploadBatches(client: PanelClient, ctx: WriteCtx, input: BatchInp
 }
 
 /**
- * 把归一化后的会话消息按"每轮真人对话"切分成多个 round，严格对齐 proxy 的
- * final-answer 切分规则（handler-glue.ts + normalize-conversation.ts）：
- *   - proxy 用 isFinalAnswer(msg) 判定 final：assistant 且不含 tool_use/tool_calls 才是 final answer；
- *   - 每遇到一个 final answer 即收尾为一轮，本轮 = 从上一个 final answer 之后到本次 final answer
- *     （user 输入 + 中间 tool 循环 + final answer），与 proxy findLastFinalAssistant 的切片语义一致。
- *   - 中间的 tool 态 assistant（hasToolUse）不收尾，留在同一轮内。
- * 仅保留含 assistant（即含 final answer 或工具态 assistant）的 round，避免提交无效增量。
+ * 上传会话（skill 链路）：整个 session 一次性调用 /skill/extract（direct-trigger）。
+ *
+ * 为什么不走 /skill/conversation/add（增量累积）：
+ *   conversation/add 需要累计 10 个 tool_call 或 40KB 字节才触发归档抽取（阈值判定），
+ *   离线导入的短会话（单 session 通常 4~6 个 tool_use）永远达不到阈值，导致 skill 抽取
+ *   从未被触发（消息一直停留在 buffer）。/skill/extract 不做阈值判定，一次调用产生一个
+ *   独立 archive + 一条 SkillTaskEntry，语义与「离线全量回放」完全匹配。
+ *
+ * 与实时流 buffer 的叠加边界：
+ *   /skill/extract 直接针对给定 session_id 生成独立 archive，不复用也不读取该 session
+ *   在 conversation/add 实时流里累积的 buffer。因此离线导入的前提是：该 session 从未被
+ *   实时流写入过（或已先经 /skill/conversation/force-archive 清空 buffer）。若同一 session
+ *   既走实时流又走离线导入，会产生两套相互独立的 archive，造成抽取结果重复。本脚本的
+ *   语料 session_id 均来自离线回放、与实时流隔离，故不叠加；混合使用场景需自行先清 buffer。
+ *
+ * 契约对齐 core /v3/skill/extract（extractRequestSchema）：
+ *   - user_id / team_id / agent_id 必填；session_id 可选（缺省 core 自动生成 sx- 前缀）；
+ *   - messages 用 extractMessageSchema：timestamp 为 datetime 字符串（非毫秒），
+ *     tool_call_id / tool_name 为可选锚点字段。
  */
-function splitIntoRounds(msgs: ImportMessage[]): ImportMessage[][] {
-  const rounds: ImportMessage[][] = [];
-  let current: ImportMessage[] = [];
-  for (const m of msgs) {
-    current.push(m);
-    // 仅遇到 final answer（assistant 且无 tool_use）时收尾一轮；中间 tool 态不收尾（与 proxy isFinalAnswer 等价）
-    if (m.role === 'assistant' && !m.hasToolUse) {
-      rounds.push(current);
-      current = [];
-    }
-  }
-  // 末尾不以 final answer 结尾时，把残留作为一轮兜底送出（proxy 实时流不会触发，但离线导入要保证送出去）
-  if (current.length > 0) rounds.push(current);
-  // 保留含 assistant / 工具态（tool_call/tool_result）的 round；纯 user 噪声轮才丢弃
-  return rounds.filter((r) => r.some((m) => m.role === 'assistant' || m.role === 'tool_call' || m.role === 'tool_result'));
-}
 
 /**
- * 上传会话（skill 链路）：按 final-answer 切片成多个 round，逐轮增量调用 /skill/conversation/add。
- * 触发 skill 抽取（archive + SkillConversationExtractWorker）。单 round 超批上限时再按 batchMessages 拆分。
- *
- * 与 proxy 实时流对齐：
- *  - 工具消息以结构化 5-role 发送（tool_call/tool_result + tool_call_id 配对锚点），不再压平成文本；
- *  - 导入前先 force-archive 清空该 session 已存在的实时流 buffer，避免与离线全量回放叠加重复
- *    （core 的 conversation-add buffer 不去重）。
+ * 把 ImportMessage 转成 extractRequestSchema.messages 元素（extractMessageSchema）。
+ * 纯函数、无副作用，便于单测（见 scripts/test-asset-import.ts）。
+ * 关键契约：
+ *   - timestamp 要求 ISO 8601 datetime 字符串；ImportMessage.ts 是毫秒数字，需 new Date(ms).toISOString()。
+ *   - ts 缺失（undefined）时省略 timestamp 字段，由 core 按导入顺序兜底生成，避免所有消息时间戳被归一化。
+ *   - tool_call_id / tool_name 仅在非空时透传（可选锚点字段）。
  */
-async function uploadViaConversationAdd(client: PanelClient, ctx: WriteCtx, input: BatchInput): Promise<void> {
-  // Fix 2：导入前先强制归档该 session 已存在的 buffer（best-effort，失败不阻断导入）
-  try {
-    await client.post('/skill/conversation/force-archive', {
+export function toExtractMessage(m: ImportMessage): Record<string, unknown> {
+  return {
+    role: m.role,
+    content: m.content,
+    ...(m.ts !== undefined ? { timestamp: new Date(m.ts).toISOString() } : {}),
+    ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+    ...(m.tool_name ? { tool_name: m.tool_name } : {}),
+  };
+}
+
+async function uploadViaSkillExtract(client: PanelClient, ctx: WriteCtx, input: BatchInput): Promise<void> {
+  const msgs = input.msgs;
+  if (msgs.length === 0) return;
+
+  // 单个 session 消息量通常远小于 500（extractRequestSchema.messages max），但为稳妥
+  // 仍按批上限拆分（超长 session 兜底），每批触发一次独立 extract。
+  const batches = batchMessages(msgs);
+  for (const batch of batches) {
+    const body = {
       space_id: client.serviceId,
       user_id: ctx.userId,
       team_id: ctx.teamId,
       agent_id: resolveSkillAgentId(ctx),
       session_id: input.sessionId,
-      reason: 'offline import pre-flush',
-    });
-  } catch (e) {
-    console.warn(`[warn] force-archive 前置失败（忽略，继续导入）: ${(e as Error).message}`);
-  }
-
-  const rounds = splitIntoRounds(input.msgs);
-  if (rounds.length === 0) return;
-  for (let r = 0; r < rounds.length; r++) {
-    const subBatches = batchMessages(rounds[r]);
-    for (const batch of subBatches) {
-      const body = {
-        space_id: client.serviceId,
-        user_id: ctx.userId,
-        team_id: ctx.teamId,
-        agent_id: resolveSkillAgentId(ctx),
-        session_id: input.sessionId,
-        messages: batch.map((m) => ({
-          role: m.role,
-          content: m.content,
-          ...(m.ts !== undefined ? { ts: m.ts } : {}),
-          ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
-          ...(m.tool_name ? { tool_name: m.tool_name } : {}),
-        })),
-      };
-      const env = await client.post('/skill/conversation/add', body);
-      if (env.code !== 0) {
-        throw new Error(`skill/conversation/add 失败 code=${env.code} msg=${env.message ?? ''}`);
-      }
+      messages: batch.map((m) => toExtractMessage(m)),
+    };
+    const env = await client.post('/skill/extract', body);
+    if (env.code !== 0) {
+      throw new Error(`skill/extract 失败 code=${env.code} msg=${env.message ?? ''}`);
     }
   }
 }
@@ -1133,7 +1119,7 @@ interface SessionInput {
  * memory 与 skill 是 core 里相互独立的两条抽取链路，故都跑（除非 extract 指定只跑其一）。
  *
  * 关于 tool 消息的处理（两条链路差异见下）：
- *  - skill 链路（uploadViaConversationAdd）：下游 core /v3/skill/conversation/add 接受
+ *  - skill 链路（uploadViaSkillExtract）：下游 core /v3/skill/extract 接受
  *    5-role，tool_call/tool_result 必须带 tool_call_id 配对锚点（缺失 → 40001）。故结构化透传。
  *  - memory 链路（uploadBatches → toMemoryMessages）：下游 core /v3/conversation/add 的 schema
  *    仅接受 user/assistant/system，无 tool 角色。故 toMemoryMessages 将 tool_call/tool_result
@@ -1147,7 +1133,7 @@ export async function uploadSession(client: PanelClient, ctx: WriteCtx, input: S
   const { session } = input;
   // 不要在此处按 user/assistant 过滤：session.messages 来自 parseJsonlLines /
   // normalizeResponsesJson，已含 tool_call/tool_result 角色（带 tool_call_id 配对锚点）。
-  // skill 链路会结构化发送（见 uploadViaConversationAdd），memory 链路会经 toMemoryMessages
+  // skill 链路会结构化发送（见 uploadViaSkillExtract），memory 链路会经 toMemoryMessages
   // 压平为文本——二者都依赖工具消息原样保留到这里。故透传全部角色并补齐 tool 字段。
   const raw = session.messages as unknown as ImportMessage[];
   const msgs: ImportMessage[] = raw.map((m) => ({
@@ -1173,7 +1159,7 @@ export async function uploadSession(client: PanelClient, ctx: WriteCtx, input: S
   }
   // 2) skill 链路：按 final-answer 切片增量触发 skill 抽取（extract !== 'memory' 时跑）
   if (input.extract !== 'memory') {
-    await uploadViaConversationAdd(client, ctx, batchInput);
+    await uploadViaSkillExtract(client, ctx, batchInput);
   }
 }
 

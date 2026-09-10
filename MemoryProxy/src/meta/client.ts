@@ -208,6 +208,11 @@ export interface ListAccessibleAssetsInput {
    */
   visibility?: string;
   agent_id?: string;
+  /**
+   * 是否包含候选/草稿态资产（candidate/draft）。缺省 false = 消费侧不可见
+   * （design-156.md §4.3 门控）。仅审核页传 true。
+   */
+  includeCandidates?: boolean;
 }
 
 // ── NotFoundError ────────────────────────────────────────────────────────────
@@ -362,6 +367,7 @@ export class MetadataClient {
         action: input.action ?? "read",
         visibility: input.visibility,
         agent_id: input.agent_id,
+        include_candidates: input.includeCandidates,
       },
       LIST_PAGE_SIZE,
     );

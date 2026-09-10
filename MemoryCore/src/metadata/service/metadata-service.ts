@@ -217,9 +217,24 @@ export interface ListAccessibleAssetsParams {
   visibility?: AssetEntity["visibility"] | AssetEntity["visibility"][];
   limit?: number;
   offset?: number;
+  /**
+   * 是否包含候选/草稿态资产（candidate / draft）。
+   * - 缺省 false：候选/草稿资产对消费侧不可见（注入、检索、回执、面板"已发布"视图）
+   * - true：仅审核页 / 管理后台读取（需配合 action 权限）
+   * 这是「自动生成 → candidate → 人工审核 → approved」生命周期的门控开关
+   * （design-156.md §4.3）。
+   */
+  include_candidates?: boolean;
 }
 
 const FILTERED_STATUSES: AssetStatus[] = ["archived", "deprecated", "failed"];
+
+/**
+ * 候选/草稿态：尚未经人工审核，不进入 Agent 上下文与"已发布资产"视图。
+ * 与 FILTERED_STATUSES 分开维护——后者是"永久不可见"（归档/废弃/失败），
+ * 前者是"审核前不可见"（可经 include_candidates=true 放行给审核页）。
+ */
+const CANDIDATE_STATUSES: AssetStatus[] = ["candidate", "draft"];
 
 export interface MetadataQuotaLimits {
   maxUsersPerInstance: number;
@@ -1437,6 +1452,8 @@ export class MetadataService {
       if (!asset) continue;
 
       if (FILTERED_STATUSES.includes(asset.status)) continue;
+      // 候选/草稿资产不得注入 Agent 上下文（design-156.md §4.3 门控）
+      if (CANDIDATE_STATUSES.includes(asset.status)) continue;
 
       if (params.apply_visibility_filter && !canBindAsset(agent, asset)) continue;
 
@@ -1583,6 +1600,8 @@ export class MetadataService {
         for (const asset of page.items) {
           if (seen.has(asset.asset_id)) continue;
           if (FILTERED_STATUSES.includes(asset.status)) continue;
+          // 候选/草稿资产：审核页以外一律不可见（design-156.md §4.3 门控）
+          if (!params.include_candidates && CANDIDATE_STATUSES.includes(asset.status)) continue;
           // visibility 白名单过滤（在权限判定前先剔除，节省 checkAssetPermission 开销）
           if (visFilter && !visFilter.has(asset.visibility)) continue;
           const perm = await this.checkAssetPermission({

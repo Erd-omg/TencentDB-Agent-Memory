@@ -133,6 +133,9 @@ data/tdai-memory.db
 /.claude/
 MemoryKnowledge/data/
 
+# asset-import 离线导入 checkpoint（含本地绝对路径，运行时状态，never commit）
+.asset-import-state.json
+
 # Test coverage output
 coverage/
 **/coverage/

@@ -355,6 +355,9 @@ export const assetListAccessibleSchema = userIdOrKeyFields
     // 关键作用：让前端"团队资产"tab 从 HTTP 层就拿不到自己的 private 数据，
     // 避免\"响应体带全量、前端 JS 过滤\"的信息泄露风险。
     visibility: z.union([visibility, z.array(visibility).min(1).max(5)]).optional(),
+    // 是否包含候选/草稿态资产（design-156.md §4.3）。缺省 false = 消费侧不可见；
+    // 仅审核页 / 管理后台传 true 读取待审核资产。
+    include_candidates: z.boolean().optional(),
   })
   .merge(paginationInputSchema)
   .refine(requireUserIdOrKey, userIdOrKeyRefine);

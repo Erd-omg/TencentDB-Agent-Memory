@@ -39,7 +39,7 @@ npm run dev
 
 | 请求前缀 | 默认目标 | 环境变量 |
 |----------|----------|----------|
-| `/api/v1`、`/health` | `http://127.0.0.1:8123` | `VITE_TMC_BACKEND_URL` |
+| `/api/v1`、`/health` | `http://127.0.0.1:8125` | `VITE_TMC_BACKEND_URL` |
 | `/v3` | `http://127.0.0.1:8420` | `VITE_SKILL_GATEWAY_URL` |
 
 如需连接其他开发环境，请在未提交的 `web/.env` 中使用实际地址。不要把内部地址、账号或凭证写入 README、源码或已跟踪的环境文件。
