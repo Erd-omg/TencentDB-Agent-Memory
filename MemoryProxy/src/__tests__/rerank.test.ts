@@ -255,6 +255,32 @@ describe("rerankCandidates — contributed 纳入历史效果/可信度（证据
     expect(byId["skl-u"].dimScores.credibility).toBeCloseTo(2 / 6, 5); // used×2 → 2/6
   });
 
+  it("validated+contributed 同批写入去重（方案 A：一次贡献只算一次强信号，不双算）", () => {
+    // 真实场景：finalize 里 validated 写成功后立即追加 contributed（同资产、同任务）。
+    // 方案 A 语义：contributed 覆盖 validated，strong = max(validated, contributed)。
+    // 若简单相加 (validated+contributed)*2 会双算 → 本测试锁定「去重」。
+    addEvtX("validated", "skl-same", { userId: "usr-A", sessionKey: "sess-f1", teamId: "team-a" });
+    addEvtX("contributed", "skl-same", { userId: "usr-A", sessionKey: "sess-f1", teamId: "team-a" });
+    // 对照：仅 validated×1（无 contributed），二者应等价。
+    addEvtX("validated", "skl-only", { userId: "usr-B", sessionKey: "sess-g1", teamId: "team-a" });
+
+    const hits = [
+      hit({ skill_id: "skl-same", score: 0.7 }),
+      hit({ skill_id: "skl-only", score: 0.7 }),
+    ];
+    const out = rerankCandidates({ hits, ctx: CTX, cfg: CFG, deps: { repo: getAssetEventRepo(), now: () => NOW } });
+    const byId = Object.fromEntries(out.map((c) => [c.hit.assetId, c]));
+
+    // historicalEffect：skl-same 应 = (max(1,1) + 0) / (0 + 1) = 1.0，而非 (1+1)/2 = 1.0 的巧合——
+    // 用「同批 1 次」对比「仅 validated 1 次」：二者应完全一致（去重生效，不双算）。
+    expect(byId["skl-same"].dimScores.historicalEffect).toBeCloseTo(1.0, 5);
+    expect(byId["skl-only"].dimScores.historicalEffect).toBeCloseTo(1.0, 5);
+
+    // credibility：skl-same = (max(1,1)*2)/6 = 2/6，skl-only 同样 2/6 —— 同批双写不抬分。
+    expect(byId["skl-same"].dimScores.credibility).toBeCloseTo(2 / 6, 5);
+    expect(byId["skl-only"].dimScores.credibility).toBeCloseTo(2 / 6, 5);
+  });
+
   it("contributed 受同 team + 时间窗收敛（他 team 的 contributed 不计入）", () => {
     const DAY = 24 * 60 * 60 * 1000;
     const repo = getAssetEventRepo()!;

@@ -82,6 +82,12 @@ function stageCounts(
  * 可信度：contributed（证据链终点，测试通过+保守归因通过）与 validated 同为强信号（×2）、
  * used 中、无历史中性；有 corrected → 打对折。
  * teamScope/sinceMs 交给 stageCounts 收敛（同 team + 时间窗，避免他人/过期待验证当高可信）。
+ *
+ * ⚠️ 去重语义（方案 A）：contributed 是 validated 的**严格子集**——finalize 里 validated
+ * 写成功后**立即追加** contributed（同资产、同任务），二者必然成对出现。若简单相加
+ * `(validated + contributed) * 2`，会把「同一份贡献」重复计成 2 次强信号，系统性抬升
+ * 刚结束任务的资产分数。因此用 `strong = Math.max(validated, contributed)` 去重：一次
+ * 贡献只算一次强信号（contributed 覆盖 validated，语义 = 「验证」升级为「已贡献」）。
  */
 function credibilityFrom(
   repo: AssetEventRepo | null,
@@ -91,15 +97,17 @@ function credibilityFrom(
 ): number {
   const { validated, used, corrected, contributed } = stageCounts(repo, assetId, teamScope, sinceMs);
   if (validated + used + corrected + contributed === 0) return NEUTRAL;
-  const base = Math.min(1, ((validated + contributed) * 2 + used) / 6);
+  const strong = Math.max(validated, contributed);
+  const base = Math.min(1, (strong * 2 + used) / 6);
   return base * (corrected === 0 ? 1 : 0.5);
 }
 
 /**
- * 历史效果（跨 agent/团队内复用信号）：有效复用比 = (validated + contributed + 0.5·used) / 复用次数，
+ * 历史效果（跨 agent/团队内复用信号）：有效复用比 = (strong + 0.5·used) / 复用次数，
  * corrected 拉低。无复用历史 → 中性。
- * contributed 是证据链终点（validated 的严格子集：真测试通过 + 保守归因通过），与 validated
- * 同等强度计入复用比，使「本次贡献」成为可被下次检索复用的真实信号（而非死数据）。
+ * contributed 是证据链终点（validated 的严格子集：真测试通过 + 保守归因通过），此处用
+ * `strong = Math.max(validated, contributed)` 去重（见 credibilityFrom 方案 A 说明）——
+ * 同一次「贡献」不被 validated 与 contributed 重复计入复用比，避免同一证据双算。
  */
 function historicalEffectFrom(
   repo: AssetEventRepo | null,
@@ -109,7 +117,8 @@ function historicalEffectFrom(
 ): number {
   const { validated, used, corrected, contributed } = stageCounts(repo, assetId, teamScope, sinceMs);
   if (used + validated + contributed === 0) return NEUTRAL;
-  const ratio = (validated + contributed + 0.5 * used) / Math.max(1, used + validated + contributed);
+  const strong = Math.max(validated, contributed);
+  const ratio = (strong + 0.5 * used) / Math.max(1, used + strong);
   return Math.max(0, Math.min(1, ratio - (corrected > 0 ? 0.2 : 0)));
 }
 
