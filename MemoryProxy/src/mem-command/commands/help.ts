@@ -21,7 +21,8 @@ const HELP_TEXT = `## 支持的 mem: 命令
 | \`mem:propose [task_id]\` | 手动触发候选资产生成（任务经验回流）：从会话证据链提炼候选（candidate），待审核 |
 | \`mem:review list [--status=…]\` | 列出候选/已批准/已拒绝资产（缺省 candidate） |
 | \`mem:review show <资产id>\` | 查看候选资产来源/证据/正文 |
-| \`mem:review apply <资产id>\` | 批准候选（candidate → approved，进入权威资产库） |
+| \`mem:review apply <资产id>\` | 批准候选（candidate → approved，进入权威资产库；skill 类候选落地 skill 域，幂等不重复创建） |
+| \`mem:review supersede <旧id> <新id>\` | 旧资产被新版替代（approved → deprecated，消费侧自动过滤） |
 | \`mem:review reject <资产id> [原因]\` | 拒绝候选（candidate → failed，保留审计） |
 | \`mem:help\` | 显示本帮助 |
 
