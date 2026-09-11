@@ -891,8 +891,15 @@ interface WriteCtx {
   target: 'agent' | 'team';
 }
 
-/** 解析 skill 实际归属的 agent_id：team 池用 userId 兜底，对齐 UI 语义。 */
-function resolveSkillAgentId(ctx: WriteCtx): string {
+/**
+ * 解析 skill 实际归属的 agent_id：team 池用 userId 兜底，对齐 UI 语义。
+ *
+ * ⚠️ 已知坑（design-156.md §15.5）：`--target team` 会使 skill 抽取的 agent_id 落到
+ * userId 兜底，导致抽取走错 owner、`candidates=0`（任务一 e2e 曾因此 recall=0）。
+ * 务必用 `--target agent` 导入才会把 skill 绑到 agent 维度。由
+ * `scripts/verify-resolve-skill-agent-id.mjs` 锁定此语义，勿改签名/语义。
+ */
+export function resolveSkillAgentId(ctx: WriteCtx): string {
   return ctx.target === 'team' ? ctx.userId : ctx.agentId;
 }
 
