@@ -12,6 +12,7 @@ import { CodePage } from '@/pages/CodePage';
 import { SkillsPage } from '@/pages/SkillsPage';
 import { ChatMemoryPage } from '@/pages/ChatMemoryPage';
 import { EvidencePage } from '@/pages/EvidencePage';
+import { ReviewPage } from '@/pages/ReviewPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { AgentsPage } from '@/pages/AgentsPage';
 import { ApiKeysPage } from '@/pages/ApiKeysPage';
@@ -28,6 +29,7 @@ export const routes: RouteObject[] = [
       { path: 'skills', element: <SkillsPage /> },
       { path: 'memory', element: <ChatMemoryPage /> },
       { path: 'evidence', element: <EvidencePage /> },
+      { path: 'review', element: <ReviewPage /> },
       { path: 'team/members', element: <MembersPage /> },
       { path: 'team/agents', element: <AgentsPage /> },
       { path: 'team/api-keys', element: <ApiKeysPage /> },

@@ -59,7 +59,7 @@ export const assetsApi = {
   /** 更新资产 */
   update: (
     assetId: string,
-    data: Partial<{ name: string; description: string; status: AssetStatus; visibility: string }>
+    data: Partial<{ name: string; description: string; status: AssetStatus; visibility: string; metadata_json: string }>
   ) => metaPost<Asset>('asset/update', { asset_id: assetId, ...data }),
 
   /** 删除资产（meta asset/delete → 物理删除行） */

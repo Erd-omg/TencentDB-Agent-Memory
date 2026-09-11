@@ -79,7 +79,7 @@ export interface Agent {
 }
 
 export type AssetType = 'skill' | 'llm_wiki' | 'code_graph' | 'chat_memory';
-export type AssetStatus = 'draft' | 'candidate' | 'approved' | 'deprecated' | 'archived';
+export type AssetStatus = 'draft' | 'candidate' | 'approved' | 'failed' | 'deprecated' | 'archived';
 
 export interface Asset {
   asset_id: string;

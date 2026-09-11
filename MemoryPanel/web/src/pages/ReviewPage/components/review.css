@@ -1,0 +1,97 @@
+/* ReviewPage 候选审核页样式 */
+
+._review-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 12px;
+}
+
+._review-item-meta {
+  color: var(--td-text-color-secondary, #888);
+  font-size: 12px;
+}
+
+._review-detail {
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+}
+
+._review-notice {
+  margin-bottom: 12px;
+}
+
+._review-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+._review-detail-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+._review-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+._review-mono {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--td-text-color-secondary, #666);
+  word-break: break-all;
+}
+
+._review-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+._review-detail-value {
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+._review-reject-info {
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(255, 152, 0, 0.08);
+  border-left: 3px solid #ff9800;
+}
+
+._review-content {
+  margin: 0;
+  padding: 12px;
+  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+._review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--td-border-level-1-color, #eee);
+}
+
+._review-reject-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--td-border-level-2-color, #ddd);
+  border-radius: 4px;
+  font-size: 13px;
+}
