@@ -19,6 +19,7 @@ export type TFunc = (key: string) => string;
 export function effMeta(t: TFunc): Record<string, { icon: string; label: string; theme: StatusTheme }> {
   return {
     corrected: { icon: '❌', label: t('evidence.eff.corrected'), theme: 'error' },
+    contributed: { icon: '🌟', label: t('evidence.eff.contributed'), theme: 'success' },
     validated: { icon: '✅', label: t('evidence.eff.validated'), theme: 'success' },
     validated_no_use: { icon: '⚠️', label: t('evidence.eff.validated_no_use'), theme: 'warning' },
     reused: { icon: '🔄', label: t('evidence.eff.reused'), theme: 'success' },

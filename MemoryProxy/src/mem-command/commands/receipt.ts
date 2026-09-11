@@ -46,12 +46,13 @@ const TYPE_LABEL: Record<string, string> = {
 /** 卡片排序优先级（越小越靠前；reference_only 最后折叠）。 */
 const EFFECTIVENESS_PRIORITY: Record<AssetEffectiveness, number> = {
   corrected: 0,
-  validated: 1,
-  reused: 2,
-  adopted: 3,
-  selected: 4,
-  validated_no_use: 5,
-  reference_only: 6,
+  contributed: 1,
+  validated: 2,
+  reused: 3,
+  adopted: 4,
+  selected: 5,
+  validated_no_use: 6,
+  reference_only: 7,
 };
 
 /** 过程资产类别（赛题任务四）展示：图标 + 标签。加粗首字便于扫读。 */
@@ -148,6 +149,7 @@ function envCompatPhrase(v: number): string {
 /** A4 平实效果计数 —— 去掉 validated_no_use 等术语，平实词表达。 */
 function plainEffectivenessLines(eff: Record<AssetEffectiveness, number>): string[] {
   const buckets: string[] = [];
+  if (eff.contributed > 0) buckets.push(`🌟 ${eff.contributed} 项已验证且本次贡献`);
   if (eff.validated > 0) buckets.push(`✅ ${eff.validated} 项已通过验证`);
   if (eff.corrected > 0) buckets.push(`❌ ${eff.corrected} 项需修正`);
   const pending = (eff.adopted ?? 0) + (eff.selected ?? 0);
@@ -438,6 +440,7 @@ export function renderMarkdownReceipt(
     lines.push(`**证据链（事件计数）：** ${rawSummary || "（暂无）"}`);
     lines.push("");
     const effParts = [
+      `🌟已验证且本次贡献 ${eff.contributed}`,
       `✅已验证 ${eff.validated}`,
       `🔄复用 ${eff.reused}`,
       `⏳待验证 ${eff.adopted + eff.selected}`,

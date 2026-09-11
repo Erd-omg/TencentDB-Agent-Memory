@@ -55,8 +55,9 @@ function stageCounts(
   validated: number;
   used: number;
   corrected: number;
+  contributed: number;
 } {
-  const out = { validated: 0, used: 0, corrected: 0 };
+  const out = { validated: 0, used: 0, corrected: 0, contributed: 0 };
   if (!repo) return out;
   let events;
   try {
@@ -72,12 +73,14 @@ function stageCounts(
     if (stage === "validated") out.validated++;
     else if (stage === "used") out.used++;
     else if (stage === "corrected") out.corrected++;
+    else if (stage === "contributed") out.contributed++;
   }
   return out;
 }
 
 /**
- * 可信度：validated 强（×2）、used 中、无历史中性；有 corrected → 打对折。
+ * 可信度：contributed（证据链终点，测试通过+保守归因通过）与 validated 同为强信号（×2）、
+ * used 中、无历史中性；有 corrected → 打对折。
  * teamScope/sinceMs 交给 stageCounts 收敛（同 team + 时间窗，避免他人/过期待验证当高可信）。
  */
 function credibilityFrom(
@@ -86,15 +89,17 @@ function credibilityFrom(
   teamScope: string | undefined,
   sinceMs: number | undefined,
 ): number {
-  const { validated, used, corrected } = stageCounts(repo, assetId, teamScope, sinceMs);
-  if (validated + used + corrected === 0) return NEUTRAL;
-  const base = Math.min(1, (validated * 2 + used) / 6);
+  const { validated, used, corrected, contributed } = stageCounts(repo, assetId, teamScope, sinceMs);
+  if (validated + used + corrected + contributed === 0) return NEUTRAL;
+  const base = Math.min(1, ((validated + contributed) * 2 + used) / 6);
   return base * (corrected === 0 ? 1 : 0.5);
 }
 
 /**
- * 历史效果（跨 agent/团队内复用信号）：有效复用比 = (validated + 0.5·used) / 复用次数，
+ * 历史效果（跨 agent/团队内复用信号）：有效复用比 = (validated + contributed + 0.5·used) / 复用次数，
  * corrected 拉低。无复用历史 → 中性。
+ * contributed 是证据链终点（validated 的严格子集：真测试通过 + 保守归因通过），与 validated
+ * 同等强度计入复用比，使「本次贡献」成为可被下次检索复用的真实信号（而非死数据）。
  */
 function historicalEffectFrom(
   repo: AssetEventRepo | null,
@@ -102,9 +107,9 @@ function historicalEffectFrom(
   teamScope: string | undefined,
   sinceMs: number | undefined,
 ): number {
-  const { validated, used, corrected } = stageCounts(repo, assetId, teamScope, sinceMs);
-  if (used + validated === 0) return NEUTRAL;
-  const ratio = (validated + 0.5 * used) / Math.max(1, used + validated);
+  const { validated, used, corrected, contributed } = stageCounts(repo, assetId, teamScope, sinceMs);
+  if (used + validated + contributed === 0) return NEUTRAL;
+  const ratio = (validated + contributed + 0.5 * used) / Math.max(1, used + validated + contributed);
   return Math.max(0, Math.min(1, ratio - (corrected > 0 ? 0.2 : 0)));
 }
 

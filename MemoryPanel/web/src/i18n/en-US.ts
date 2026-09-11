@@ -1537,6 +1537,7 @@ export const enUS = {
   'evidence.load_receipt_error': 'Failed to load receipt',
   'evidence.chain_warning_count': '{{count}} evidence-chain warnings',
   'evidence.eff.corrected': 'Needs correction',
+  'evidence.eff.contributed': 'Verified & contributed this run',
   'evidence.eff.validated': 'Verified by test',
   'evidence.eff.validated_no_use': 'Validated without use',
   'evidence.eff.reused': 'Reused (indirect)',

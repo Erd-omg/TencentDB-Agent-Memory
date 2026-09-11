@@ -224,6 +224,60 @@ describe("rerankCandidates — historicalEffect（同 team 跨用户：他 user 
   });
 });
 
+describe("rerankCandidates — contributed 纳入历史效果/可信度（证据链终点信号）", () => {
+  it("contributed 与 validated 同等强度计入 historicalEffect/credibility（不再死数据）", () => {
+    // skl-c：contributed×2（无 validated/used）→ 历史效果应与 validated×2 等价（有效复用比 1.0）。
+    // 对照 skl-v：validated×2；skl-u：used×2。
+    addEvtX("contributed", "skl-c", { userId: "usr-A", sessionKey: "sess-c1", teamId: "team-a" });
+    addEvtX("contributed", "skl-c", { userId: "usr-A", sessionKey: "sess-c2", teamId: "team-a" });
+    addEvtX("validated", "skl-v", { userId: "usr-B", sessionKey: "sess-v1", teamId: "team-a" });
+    addEvtX("validated", "skl-v", { userId: "usr-B", sessionKey: "sess-v2", teamId: "team-a" });
+    addEvtX("used", "skl-u", { userId: "usr-C", sessionKey: "sess-u1", teamId: "team-a" });
+    addEvtX("used", "skl-u", { userId: "usr-C", sessionKey: "sess-u2", teamId: "team-a" });
+
+    const hits = [
+      hit({ skill_id: "skl-c", score: 0.7 }),
+      hit({ skill_id: "skl-v", score: 0.7 }),
+      hit({ skill_id: "skl-u", score: 0.7 }),
+    ];
+    const out = rerankCandidates({ hits, ctx: CTX, cfg: CFG, deps: { repo: getAssetEventRepo(), now: () => NOW } });
+    const byId = Object.fromEntries(out.map((c) => [c.hit.assetId, c]));
+
+    // contributed×2 → (0 + 2 + 0) / (0 + 2) = 1.0，与 validated×2 完全一致。
+    expect(byId["skl-c"].dimScores.historicalEffect).toBeCloseTo(1.0, 5);
+    expect(byId["skl-v"].dimScores.historicalEffect).toBeCloseTo(1.0, 5);
+    // used×2 → (0 + 0.5·2) / 2 = 0.5（弱于 contributed）。
+    expect(byId["skl-u"].dimScores.historicalEffect).toBeCloseTo(0.5, 5);
+
+    // credibility：contributed 与 validated 同为 ×2 强信号 → (2·2)/6 = 4/6。
+    expect(byId["skl-c"].dimScores.credibility).toBeCloseTo(4 / 6, 5);
+    expect(byId["skl-v"].dimScores.credibility).toBeCloseTo(4 / 6, 5);
+    expect(byId["skl-u"].dimScores.credibility).toBeCloseTo(2 / 6, 5); // used×2 → 2/6
+  });
+
+  it("contributed 受同 team + 时间窗收敛（他 team 的 contributed 不计入）", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const repo = getAssetEventRepo()!;
+    // 他 team 的 contributed → sameTeamOnly 排除。
+    repo.insert(repo.newEvent({
+      stage: "contributed",
+      asset: { assetId: "skl-x", assetType: "skill", name: "skl-x" },
+      sessionKey: "sess-z",
+      teamId: "team-z",
+      userId: "usr-A",
+      createdAt: NOW - DAY,
+    }));
+    const hitX = hit({ skill_id: "skl-x", name: "skl-x", owner_agent_id: "agt-a", team_id: "team-a", score: 0.5 });
+    const out = rerankCandidates({
+      hits: [hitX], ctx: CTX,
+      cfg: { ...CFG, selectedThreshold: 0.65, topN: 1, effect: { sameTeamOnly: true, windowDays: 90 } },
+      deps: { repo, now: () => NOW },
+    });
+    // 他 team contributed 被排除 → 历史效果中性。
+    expect(out[0].dimScores.historicalEffect).toBe(0.5);
+  });
+});
+
 describe("rerankCandidates — cross-user gain flip（A 的 validated 抬升 B → 翻转入选）", () => {
   const DAY = 24 * 60 * 60 * 1000;
 

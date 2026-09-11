@@ -1498,6 +1498,7 @@ export const zhCN = {
   'evidence.load_receipt_error': '加载回执失败',
   'evidence.chain_warning_count': '{{count}} 条证据链提醒',
   'evidence.eff.corrected': '需修正',
+  'evidence.eff.contributed': '已验证且本次贡献',
   'evidence.eff.validated': '已通过测试验证',
   'evidence.eff.validated_no_use': '已标记验证（缺使用）',
   'evidence.eff.reused': '已被复用（间接验证）',

@@ -26,6 +26,7 @@ import type { AssetEvent, AssetStageSummary } from "../db/asset-event.js";
 
 export type AssetEffectiveness =
   | "corrected"
+  | "contributed"
   | "validated"
   | "validated_no_use"
   | "reused"
@@ -35,6 +36,7 @@ export type AssetEffectiveness =
 
 export const EFFECTIVENESS_META: Record<AssetEffectiveness, { icon: string; label: string }> = {
   corrected: { icon: "❌", label: "需修正" },
+  contributed: { icon: "🌟", label: "已验证且本次贡献" },
   validated: { icon: "✅", label: "已通过测试验证" },
   validated_no_use: { icon: "⚠️", label: "已标记验证（缺使用证据）" },
   reused: { icon: "🔄", label: "已被复用（间接验证）" },
@@ -69,6 +71,9 @@ export function evaluateEffectiveness(summary: AssetStageSummary, events: AssetE
 
   // 结果信号否定优先：被纠正 → 无效。
   if (stages.includes("corrected")) return "corrected";
+  // 证据链终点：contributed（finalize exit0 + used + 保守归因通过）→ 最强结果信号。
+  // 优先级高于 validated：contributed 是 validated 的严格加强（真测试通过 + 归因通过）。
+  if (stages.includes("contributed")) return "contributed";
   // 结果信号确认：validated（需 used 前置，否则 F4 降级）。
   if (stages.includes("validated")) {
     return stages.includes("used") ? "validated" : "validated_no_use";
@@ -85,7 +90,7 @@ export function evaluateEffectiveness(summary: AssetStageSummary, events: AssetE
 /** 汇总一组资产卡的有效性统计（回执汇总行用）。 */
 export function effectivenessCounts(summaries: AssetStageSummary[], events: AssetEvent[]): Record<AssetEffectiveness, number> {
   const counts: Record<AssetEffectiveness, number> = {
-    corrected: 0, validated: 0, validated_no_use: 0,
+    corrected: 0, contributed: 0, validated: 0, validated_no_use: 0,
     reused: 0, adopted: 0, selected: 0, reference_only: 0,
   };
   for (const s of summaries) {
