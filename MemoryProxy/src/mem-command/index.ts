@@ -23,6 +23,7 @@ import { executeCorrect } from "./commands/correct.js";
 import { executeFinalize } from "./commands/finalize.js";
 import { executePropose } from "./commands/propose.js";
 import { executeReview } from "./commands/review.js";
+import { executeProposal } from "./commands/proposal.js";
 
 export { parseMemCommand, parseCommandFromText, type ParsedMemCommand } from "./parser.js";
 export { buildMemResponse } from "./response-builder.js";
@@ -43,6 +44,7 @@ const KNOWN_COMMANDS = new Set([
   "finalize",
   "propose",
   "review",
+  "proposal",
   "help",
 ]);
 
@@ -100,6 +102,8 @@ export async function executeMemCommand(
       return executePropose(ctx);
     case "review":
       return executeReview(ctx);
+    case "proposal":
+      return executeProposal(ctx);
     case "session-reset":
       return executeSessionReset(ctx);
     default: {

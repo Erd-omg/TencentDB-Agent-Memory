@@ -23,6 +23,7 @@ import { buildMemResponse } from "../response-builder.js";
 import { getMetadataClient } from "../../meta/client.js";
 import { getCoreSkillClient } from "../../skill/core-client.js";
 import { mdHeader, mdSection, mdBullet, mdBlank, mdJoin } from "../md.js";
+import { parseProposalMeta } from "./proposal.js";
 
 type ReviewAction = "list" | "show" | "apply" | "reject" | "supersede";
 
@@ -195,6 +196,73 @@ export async function executeReview(ctx: MemCommandContext): Promise<MemCommandR
       if (!cur) {
         const text = mdJoin([mdHeader("❌", "未找到资产"), mdBlank(), mdBullet(`\`${assetId}\` 不在本团队资产中。`)]);
         return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
+      }
+
+      // ── 提案识别（§8.5）：apply 提案 = 对目标资产执行原子变更，而非落地新 skill ──
+      const proposal = parseProposalMeta(cur.metadata_json);
+      if (proposal) {
+        const target = items.find((a) => a.asset_id === proposal.target_asset_id);
+        if (!target) {
+          const text = mdJoin([
+            mdHeader("❌", "提案目标资产不存在"),
+            mdBlank(),
+            mdBullet(`提案指向 \`${proposal.target_asset_id}\`，但该资产不在本团队中，无法执行变更。`),
+          ]);
+          return { success: false, messageText: text, response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }) };
+        }
+
+        // 原子变更：deprecate/conflict → 目标 deprecated；downgrade → 降 risk（metadata_json.risk=low）。
+        // revise 需要补丁草案（expected_version.diffHint）—— v1 只记录提案通过，实际正文修订
+        // 由人工在 skill 域完成（诚实边界：不自动改写权威正文，避免误伤）。
+        let targetPatch: { status?: string; metadata_json?: string };
+        if (proposal.kind === "deprecate" || proposal.kind === "conflict") {
+          let orig: Record<string, unknown> = {};
+          try {
+            if (target.metadata_json) orig = JSON.parse(target.metadata_json) as Record<string, unknown>;
+          } catch { /* ignore */ }
+          targetPatch = {
+            status: "deprecated",
+            metadata_json: JSON.stringify({
+              ...orig,
+              deprecated_by_proposal: assetId,
+              deprecate_kind: proposal.kind,
+            }),
+          };
+        } else if (proposal.kind === "downgrade") {
+          let orig: Record<string, unknown> = {};
+          try {
+            if (target.metadata_json) orig = JSON.parse(target.metadata_json) as Record<string, unknown>;
+          } catch { /* ignore */ }
+          targetPatch = {
+            metadata_json: JSON.stringify({ ...orig, risk: "low", downgraded_by_proposal: assetId }),
+          };
+        } else {
+          // revise：不自动改写正文，仅记录提案通过（诚实边界）。
+          targetPatch = {};
+        }
+
+        await meta.updateAsset(assetId, { status: "approved" });
+        if (targetPatch.status || targetPatch.metadata_json) {
+          await meta.updateAsset(proposal.target_asset_id, targetPatch);
+        }
+
+        const actionLabel = proposal.kind === "deprecate" || proposal.kind === "conflict"
+          ? "已标记目标资产 deprecated（消费侧自动过滤）"
+          : proposal.kind === "downgrade"
+            ? "已降目标资产风险为 low"
+            : "已通过（revise：正文修订由人工在 skill 域完成）";
+        const text = mdJoin([
+          mdHeader("✅", "提案已批准并执行"),
+          mdBlank(),
+          mdBullet(`提案 \`${assetId}\` → approved。`),
+          mdBullet(`目标资产 \`${proposal.target_asset_id}\`：${actionLabel}。`),
+        ]);
+        return {
+          success: true,
+          messageText: text,
+          data: { proposal_id: assetId, status: "approved", target_asset_id: proposal.target_asset_id, kind: proposal.kind },
+          response: buildMemResponse(text, { protocol: ctx.protocol, stream: ctx.stream, requestId, thinking: ctx.thinking }),
+        };
       }
 
       const updated = await meta.updateAsset(assetId, { status: "approved" });

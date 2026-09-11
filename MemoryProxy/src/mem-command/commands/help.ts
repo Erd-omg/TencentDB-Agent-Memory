@@ -24,6 +24,8 @@ const HELP_TEXT = `## 支持的 mem: 命令
 | \`mem:review apply <资产id>\` | 批准候选（candidate → approved，进入权威资产库；skill 类候选落地 skill 域，幂等不重复创建） |
 | \`mem:review supersede <旧id> <新id>\` | 旧资产被新版替代（approved → deprecated，消费侧自动过滤） |
 | \`mem:review reject <资产id> [原因]\` | 拒绝候选（candidate → failed，保留审计） |
+| \`mem:proposal create <资产id> --kind=revise|deprecate|conflict|downgrade [--reason=…]\` | 对既有权威资产发起变更提案（candidate，待审核） |
+| \`mem:proposal list [--status=…]\` | 列出提案（apply 时对目标资产执行原子变更） |
 | \`mem:help\` | 显示本帮助 |
 
 ---
@@ -113,6 +115,8 @@ mem:propose
 mem:review list
 mem:review apply cand-xxx
 mem:review reject cand-xxx 已过时
+mem:proposal create skl-old --kind=deprecate --reason=已被新版替代
+mem:proposal list
 mem:session-reset
 mem:help
 \`\`\`
