@@ -133,11 +133,61 @@ export function extractCitationAnchors(
   originText: string,
   minAnchors = 1,
 ): string[] {
-  if (!assetName || !originText) return [];
+  return extractCitationAnchorsDetailed(assetName, originText, minAnchors).anchors;
+}
+
+/** 引用锚点置信度分层（4B）。 */
+export type CitationConfidence = "high" | "medium" | "low";
+
+/** 引用锚点提取结果（含置信度分层）。 */
+export interface CitationAnchorResult {
+  /** 命中的锚点 token。 */
+  anchors: string[];
+  /** 置信度分层：high(≥2 锚点 或 含专有名词) / medium(单个泛化词) / low(仅短噪声词)。 */
+  confidence: CitationConfidence;
+  /** 命中的专有名词锚点（连字符复合词 / 驼峰 / 含数字标识符）。 */
+  properAnchors: string[];
+}
+
+/**
+ * 引用锚点置信度分层判定（纯函数，4B）。
+ *   - high：命中 ≥2 个锚点，**或**命中 ≥1 个专有名词锚点（强信号，如 cloud-migration-postmortems）；
+ *   - medium：仅命中 1 个泛化 token（如 migration）；
+ *   - low：无锚点，或仅有极短噪声 token（已由 tokenizeCitation 的 ≥3 字符过滤，此处兜底）。
+ *
+ * 专有名词判定：token 含连字符（复合词）、或含数字、或原文本里以驼峰出现，
+ * 视为"专名"——这类命中比泛化词更能证明"点名了该资产"。
+ */
+export function extractCitationAnchorsDetailed(
+  assetName: string | undefined,
+  originText: string,
+  minAnchors = 1,
+): CitationAnchorResult {
+  if (!assetName || !originText) return { anchors: [], confidence: "low", properAnchors: [] };
   const nameTokens = tokenizeCitation(assetName);
   const originTokens = new Set(tokenizeCitation(originText));
   const anchors = nameTokens.filter((t) => originTokens.has(t));
-  return anchors.length >= minAnchors ? anchors : [];
+  if (anchors.length < minAnchors) return { anchors: [], confidence: "low", properAnchors: [] };
+  // 专名锚点：命中 token 在**资产名原文**里属于连字符/下划线复合词，或 token 本身含数字。
+  const properAnchors = anchors.filter((t) => isProperNounToken(t, assetName));
+  const confidence: CitationConfidence =
+    anchors.length >= 2 || properAnchors.length >= 1 ? "high" : "medium";
+  return { anchors, confidence, properAnchors };
+}
+
+/**
+ * 专有名词 token 判定（4B）：
+ *   - token 本身含数字（如 v3、ripgrep2）；或
+ *   - token 在**资产名原文**里出现在连字符/下划线复合词中（如 cloud-migration-postmortems
+ *     拆分出 migration，但原文是 `cloud-migration-postmortems` 复合词 → migration 属专名片段）。
+ * 注意：不用"长度"作判据——`migration`（9 字符）单独出现时是泛化词，不应误判为专名。
+ */
+function isProperNounToken(t: string, assetName: string): boolean {
+  if (/\d/.test(t)) return true;
+  const lowerName = (assetName ?? "").toLowerCase();
+  // 资产名里存在包含该 token 的连字符/下划线复合词 → 该 token 是专名的一部分。
+  const compounds = lowerName.match(/[a-z0-9]+(?:[-_][a-z0-9]+)+/g) ?? [];
+  return compounds.some((c) => c.split(/[-_]/).includes(t));
 }
 
 /**

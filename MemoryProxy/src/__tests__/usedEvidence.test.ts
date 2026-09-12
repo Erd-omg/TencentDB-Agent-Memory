@@ -13,6 +13,7 @@ import {
   emitUsedEvents,
   emitOpenedEvents,
   extractCitationAnchors,
+  extractCitationAnchorsDetailed,
 } from "../evidence/used-evidence.js";
 import { getAssetEventRepo, __resetAssetEventRepoForTests } from "../db/assetEventRepo.js";
 import { __resetDbForTests } from "../db/index.js";
@@ -176,5 +177,47 @@ describe("extractCitationAnchors（引用锚点纯函数）", () => {
   it("空名或空出处 → 空数组", () => {
     expect(extractCitationAnchors(undefined, "text")).toEqual([]);
     expect(extractCitationAnchors("name", "")).toEqual([]);
+  });
+});
+
+describe("extractCitationAnchorsDetailed（4B 置信度分层）", () => {
+  it("命中专有名词锚点（连字符复合词）→ high", () => {
+    const d = extractCitationAnchorsDetailed(
+      "cloud-migration-postmortems",
+      "参考 cloud-migration-postmortems 的时序经验",
+    );
+    expect(d.anchors.length).toBeGreaterThan(0);
+    expect(d.confidence).toBe("high");
+    expect(d.properAnchors.length).toBeGreaterThan(0);
+  });
+
+  it("命中 ≥2 个锚点 → high", () => {
+    const d = extractCitationAnchorsDetailed(
+      "vss acl ordering guide",
+      "vss 与 acl 的 ordering 需要调整",
+    );
+    expect(d.anchors.length).toBeGreaterThanOrEqual(2);
+    expect(d.confidence).toBe("high");
+  });
+
+  it("仅命中 1 个泛化 token → medium", () => {
+    const d = extractCitationAnchorsDetailed(
+      "migration guide alpha",
+      "这次 migration 很关键",
+    );
+    expect(d.anchors).toContain("migration");
+    expect(d.confidence).toBe("medium");
+  });
+
+  it("无命中 → low", () => {
+    const d = extractCitationAnchorsDetailed("cloud-migration-postmortems", "无关文本");
+    expect(d.anchors).toEqual([]);
+    expect(d.confidence).toBe("low");
+  });
+
+  it("extractCitationAnchors 与 Detailed 的 anchors 一致（向后兼容）", () => {
+    const name = "cloud-migration-postmortems";
+    const text = "cloud-migration-postmortems 经验";
+    expect(extractCitationAnchors(name, text)).toEqual(extractCitationAnchorsDetailed(name, text).anchors);
   });
 });

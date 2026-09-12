@@ -74,6 +74,13 @@ export interface AssetEventEvidence {
     origin: "answer" | "diff";
     /** 命中的锚点 token（资产名 / 关键 token 与出处文本的共现）。 */
     anchors: string[];
+    /**
+     * 锚点置信度分层（4B）：high（≥2 锚点或含专名）/ medium（单个泛化词）/ low。
+     * 用于区分"强点名"与"弱共现"，供审计与后续收紧阈值。
+     */
+    confidence?: "high" | "medium" | "low";
+    /** 命中的专有名词锚点（连字符复合词/含数字/长标识符）。 */
+    properAnchors?: string[];
   };
   /** 测试结果证据（validated / corrected）。 */
   test_result?: {

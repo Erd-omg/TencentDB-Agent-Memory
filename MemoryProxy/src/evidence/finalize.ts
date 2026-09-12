@@ -34,7 +34,7 @@ import { getCoreSkillClient } from "../skill/core-client.js";
 import { getAssetEventRepo, type AssetEventRepo } from "../db/assetEventRepo.js";
 import type { AssetEvent, AssetRef, AssetStageSummary } from "../db/asset-event.js";
 import type { ProxyConfig } from "../types.js";
-import { extractCitationAnchors } from "./used-evidence.js";
+import { extractCitationAnchorsDetailed } from "./used-evidence.js";
 
 /** 命令输出尾部保留上限。 */
 const OUTPUT_MAX_CHARS = 2000;
@@ -230,7 +230,7 @@ export function effectiveUsedCandidates(
       continue;
     }
     if (s.stages.includes("opened")) {
-      const anchors = extractCitationAnchors(s.asset.name, diffText, 1);
+      const anchors = extractCitationAnchorsDetailed(s.asset.name, diffText, 1).anchors;
       if (anchors.length > 0) {
         // opened + diff 引用锚点 → 升级为 used（引用锚点 = 独立于"打开"的采纳信号）。
         used.push(s);
@@ -491,8 +491,8 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
     const siForUpgrade = args.sessionInfo ?? {};
     for (const s of effectiveUsed) {
       if (s.stages.includes("used")) continue; // 已是 used（写操作），无需补
-      const anchors = extractCitationAnchors(s.asset.name, diffForAttribution, 1);
-      if (anchors.length === 0) continue;
+      const detail = extractCitationAnchorsDetailed(s.asset.name, diffForAttribution, 1);
+      if (detail.anchors.length === 0) continue;
       repoEvents.insert(repoEvents.newEvent({
         stage: "used",
         asset: s.asset,
@@ -503,7 +503,12 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
         teamId: pick(siForUpgrade.team_id),
         userId: pick(siForUpgrade.user_id),
         evidence: {
-          citation: { origin: "diff", anchors },
+          citation: {
+            origin: "diff",
+            anchors: detail.anchors,
+            confidence: detail.confidence,
+            properAnchors: detail.properAnchors,
+          },
         },
       }));
     }

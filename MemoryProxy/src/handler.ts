@@ -56,7 +56,7 @@ import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js"
 import { shouldAutoAppendReceipt, hasAssetEngagement } from "./evidence/task-completion.js";
 import { renderReceiptSummary } from "./evidence/receipt-summary.js";
 import { recordChatTurn } from "./evidence/turn-tracker.js";
-import { emitUsedEvents, extractCitationAnchors } from "./evidence/used-evidence.js";
+import { emitUsedEvents, extractCitationAnchorsDetailed } from "./evidence/used-evidence.js";
 import { getAssetEventRepo } from "./db/assetEventRepo.js";
 import { runAutoValidation } from "./evidence/auto-validate.js";
 import { maybeRunAutoFinalize } from "./evidence/finalize.js";
@@ -2015,8 +2015,8 @@ export function emitAnswerCitationUsed(opts: {
       (s) => s.stages.includes("opened") && !s.stages.includes("used") && !s.stages.includes("corrected"),
     );
     for (const s of candidates) {
-      const anchors = extractCitationAnchors(s.asset.name, opts.answerText, 1);
-      if (anchors.length === 0) continue;
+      const detail = extractCitationAnchorsDetailed(s.asset.name, opts.answerText, 1);
+      if (detail.anchors.length === 0) continue;
       emitUsedEvents(
         {
           sessionKey: opts.sessionKey,
@@ -2028,7 +2028,12 @@ export function emitAnswerCitationUsed(opts: {
           bridge: "skill-bridge",
           endpoint: "answer-citation",
           httpStatus: 200, // 答复已成功返回，锚点基于成功响应文本
-          citation: { origin: "answer", anchors },
+          citation: {
+            origin: "answer",
+            anchors: detail.anchors,
+            confidence: detail.confidence,
+            properAnchors: detail.properAnchors,
+          },
         },
         [s.asset],
       );
