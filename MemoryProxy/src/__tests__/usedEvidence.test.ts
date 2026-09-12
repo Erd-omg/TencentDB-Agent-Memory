@@ -11,6 +11,8 @@ import {
   skillAssetsFromResponse,
   memoryAssetsFromItems,
   emitUsedEvents,
+  emitOpenedEvents,
+  extractCitationAnchors,
 } from "../evidence/used-evidence.js";
 import { getAssetEventRepo, __resetAssetEventRepoForTests } from "../db/assetEventRepo.js";
 import { __resetDbForTests } from "../db/index.js";
@@ -124,5 +126,55 @@ describe("emitUsedEvents", () => {
       httpStatus: 200,
     }, []);
     expect(repo.recent(10)).toHaveLength(0);
+  });
+
+  it("used 事件可携带 citation（引用锚点：opened 升级为 used）", () => {
+    const repo = getAssetEventRepo()!;
+    emitUsedEvents({
+      sessionKey: "codebuddy:conv-cite",
+      bridge: "skill-bridge",
+      endpoint: "get",
+      httpStatus: 200,
+      citation: { origin: "diff", anchors: ["cloud-migration-postmortems"] },
+    }, [{ assetId: "skl-1", assetType: "skill" }]);
+
+    const used = repo.bySessionKey("codebuddy:conv-cite", "used");
+    expect(used).toHaveLength(1);
+    expect(used[0].evidence?.citation).toEqual({ origin: "diff", anchors: ["cloud-migration-postmortems"] });
+  });
+});
+
+describe("emitOpenedEvents（P0-1：打开 ≠ 采纳）", () => {
+  it("定向读取落 opened 事件，不落 used", () => {
+    const repo = getAssetEventRepo()!;
+    emitOpenedEvents({
+      sessionKey: "codebuddy:conv-open",
+      bridge: "skill-bridge",
+      endpoint: "get",
+      httpStatus: 200,
+    }, [{ assetId: "skl-1", assetType: "skill" }]);
+
+    expect(repo.bySessionKey("codebuddy:conv-open", "opened")).toHaveLength(1);
+    expect(repo.bySessionKey("codebuddy:conv-open", "used")).toHaveLength(0);
+  });
+});
+
+describe("extractCitationAnchors（引用锚点纯函数）", () => {
+  it("资产名 token 出现在出处文本 → 返回锚点", () => {
+    const anchors = extractCitationAnchors(
+      "cloud-migration-postmortems",
+      "diff --git a/src/windows-migration.js ... cloud-migration-postmortems 时序修复",
+    );
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(anchors).toContain("migration");
+  });
+
+  it("资产名与出处无共现 → 空数组（不升级 used）", () => {
+    expect(extractCitationAnchors("cloud-migration-postmortems", "unrelated diff text only")).toEqual([]);
+  });
+
+  it("空名或空出处 → 空数组", () => {
+    expect(extractCitationAnchors(undefined, "text")).toEqual([]);
+    expect(extractCitationAnchors("name", "")).toEqual([]);
   });
 });

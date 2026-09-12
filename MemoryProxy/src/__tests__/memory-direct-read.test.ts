@@ -1,6 +1,7 @@
 /**
  * memory 定向读取证据测试 —— memoryDirectReadAssets 解析（atomic/query /
- * scenario/read）与 selected/used 落库（含 turnSeq 透传）。
+ * scenario/read）与 selected/opened 落库（含 turnSeq 透传）。
+ * P0-1：定向读取落 opened（打开 ≠ 采纳），不再落 used。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -8,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { memoryDirectReadAssets, emitSelectedEvents, emitUsedEvents, type UsedEventSource } from "../evidence/used-evidence.js";
+import { memoryDirectReadAssets, emitSelectedEvents, emitOpenedEvents, type OpenedEventSource } from "../evidence/used-evidence.js";
 import { getAssetEventRepo, __resetAssetEventRepoForTests } from "../db/assetEventRepo.js";
 import { __resetDbForTests } from "../db/index.js";
 
@@ -66,8 +67,8 @@ describe("memoryDirectReadAssets", () => {
   });
 });
 
-describe("emit selected/used 落库", () => {
-  const src: UsedEventSource = {
+describe("emit selected/opened 落库", () => {
+  const src: OpenedEventSource = {
     sessionKey: "sess-mem",
     sessionId: "sess-mem",
     taskId: "task-1",
@@ -80,15 +81,15 @@ describe("emit selected/used 落库", () => {
     turnSeq: 7,
   };
 
-  it("selected + used 双落，且 turnSeq 透传", () => {
+  it("selected + opened 双落（打开 ≠ 采纳），且 turnSeq 透传", () => {
     const repo = getAssetEventRepo()!;
     const assets = [{ assetId: "x.md", assetType: "chat-memory" as const, name: "x.md" }];
     emitSelectedEvents(src, assets);
-    emitUsedEvents(src, assets);
+    emitOpenedEvents(src, assets);
 
     const events = repo.bySessionKey("sess-mem");
     const stages = events.map((e) => e.stage).sort();
-    expect(stages).toEqual(["selected", "used"]);
+    expect(stages).toEqual(["opened", "selected"]);
     for (const e of events) {
       expect(e.turnSeq).toBe(7);
       expect(e.asset.assetType).toBe("chat-memory");

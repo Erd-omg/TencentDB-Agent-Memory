@@ -29,7 +29,7 @@ import type { AgentContext } from "../injection/types.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "../injection/injectors/tdai-fixed-asset.js";
 import type { TdaiIdentity } from "../tdai/types.js";
 import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFromSessionKey } from "./bridge-telemetry.js";
-import { emitRecalledEvents, emitSelectedEvents, emitUsedEvents, memoryAssetsFromItems, memoryDirectReadAssets, type UsedEventSource } from "../evidence/used-evidence.js";
+import { emitRecalledEvents, emitSelectedEvents, emitOpenedEvents, memoryAssetsFromItems, memoryDirectReadAssets, type OpenedEventSource } from "../evidence/used-evidence.js";
 import { currentChatTurn } from "../evidence/turn-tracker.js";
 
 const TAG = "[memory-bridge]";
@@ -523,7 +523,8 @@ export function createMemoryBridgeHandler(
     console.log(`${TAG} sub=${sub} status=${upstream.status} elapsed=${elapsed}ms`);
 
     // ── 定向读取证据（任务四 ② 证据补充）：atomic/query / scenario/read 2xx 时 ──
-    // 对齐 skill get-by-name：把内容带进决策 → selected + used（不是 search 的 recalled）。
+    // P0-1：定向读取把内容带进上下文 = opened（打开 ≠ 采纳），不再落 used。
+    // 对齐 skill get-by-name 的收紧语义：used 由「写操作」或「引用锚点升级」产生。
     // sessionId 用真实 session_id（D5），turnSeq 从 turn-tracker 取（D2）。解析失败
     // 返回 [] → 不造伪证据。静默降级：DB 不可用时 emitters 直接 no-op。
     if (upstream.status >= 200 && upstream.status < 300
@@ -533,7 +534,7 @@ export function createMemoryBridgeHandler(
         respText,
         typeof inboundBody.path === "string" ? inboundBody.path : undefined,
       );
-      const src: UsedEventSource = {
+      const src: OpenedEventSource = {
         sessionKey,
         sessionId: ids.session_id ?? sessionKey,
         taskId: effectiveTaskId,
@@ -547,7 +548,7 @@ export function createMemoryBridgeHandler(
         turnSeq: currentChatTurn(sessionKey),
       };
       emitSelectedEvents(src, directAssets);
-      emitUsedEvents(src, directAssets);
+      emitOpenedEvents(src, directAssets);
     }
 
     return new Response(respText, {

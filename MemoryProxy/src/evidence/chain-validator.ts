@@ -46,14 +46,21 @@ export function validateChain(summary: AssetStageSummary): ChainIssue[] {
     });
   }
 
-  // 规则 2（warning）：used 尽量有 injected/selected 前置（缺失时降级提示）。
-  if (stages.includes("used") && !stages.includes("injected") && !stages.includes("selected")) {
+  // 规则 2（warning）：used 尽量有 injected/selected/opened 前置（缺失时降级提示）。
+  // P0-1：used 可由「写操作」直接产生，或由「opened + 引用锚点」升级而来，故 opened
+  // 也是 used 的合法前置（读后采纳）。三者皆缺才提示。
+  if (
+    stages.includes("used")
+    && !stages.includes("injected")
+    && !stages.includes("selected")
+    && !stages.includes("opened")
+  ) {
     issues.push({
       level: "warning",
       assetId,
-      missing: "injected|selected",
-      message: `资产 ${assetId} 被标记为「使用」，但缺少 injected/selected 前置事件。`
-        + " 可能是跨工具直接读取——若确属使用，请补充 injected（mem:sync）或 selected 事件以完善链路。",
+      missing: "injected|selected|opened",
+      message: `资产 ${assetId} 被标记为「使用」，但缺少 injected/selected/opened 前置事件。`
+        + " 可能是跨工具直接写改资产——若确属使用，请补充 injected（mem:sync）、selected 或 opened 事件以完善链路。",
     });
   }
 

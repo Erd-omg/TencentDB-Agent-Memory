@@ -17,6 +17,7 @@ import { join } from "node:path";
 import {
   tokenizeText,
   correlateAssets,
+  effectiveUsedCandidates,
   pathTokensFromDiff,
   decideCorrelationWrite,
   runTaskFinalize,
@@ -28,7 +29,7 @@ import {
 } from "../evidence/finalize.js";
 import { getAssetEventRepo, __resetAssetEventRepoForTests } from "../db/assetEventRepo.js";
 import { __resetDbForTests } from "../db/index.js";
-import type { AssetEventStage } from "../db/asset-event.js";
+import type { AssetEventStage, AssetStageSummary } from "../db/asset-event.js";
 
 let tmpDir: string;
 
@@ -303,6 +304,42 @@ describe("finalize 保守写判据（防大 diff / 多资产摊分）", () => {
     expect(outcome.usedCandidateCount).toBe(1);
     expect(outcome.validatedAssetIds).toEqual(["skl-R"]);
     expect(outcome.weakRefusals).toEqual([]);
+  });
+});
+
+describe("effectiveUsedCandidates（P0-1：打开 ≠ 采纳，引用锚点升级）", () => {
+  const diff = "diff --git a/src/windows-migration.js b/src/windows-migration.js\n"
+    + "--- a/src/windows-migration.js\n"
+    + "+++ b/src/windows-migration.js\n"
+    + "-  applyAcl(host, acl);\n"
+    + "+  captureVssSnapshot(host);\n"
+    + "// cloud-migration-postmortems 时序修复";
+
+  it("仅 opened 无引用锚点 → 不升级 used，进 openedUncited", () => {
+    const summaries: AssetStageSummary[] = [
+      { asset: { assetId: "skl-open", assetType: "skill", name: "unrelated-guide" }, stages: ["opened"], lastStageAt: {} as AssetStageSummary["lastStageAt"] },
+    ];
+    const { used, openedUncited } = effectiveUsedCandidates(summaries, diff);
+    expect(used).toHaveLength(0);
+    expect(openedUncited.map((s) => s.asset.assetId)).toEqual(["skl-open"]);
+  });
+
+  it("opened + diff 引用锚点 → 升级为 used", () => {
+    const summaries: AssetStageSummary[] = [
+      { asset: { assetId: "skl-cite", assetType: "skill", name: "cloud-migration-postmortems" }, stages: ["opened"], lastStageAt: {} as AssetStageSummary["lastStageAt"] },
+    ];
+    const { used, openedUncited } = effectiveUsedCandidates(summaries, diff);
+    expect(used.map((s) => s.asset.assetId)).toEqual(["skl-cite"]);
+    expect(openedUncited).toHaveLength(0);
+  });
+
+  it("已 used 资产直接保留；corrected 跳过", () => {
+    const summaries: AssetStageSummary[] = [
+      { asset: { assetId: "skl-used", assetType: "skill", name: "cloud-migration-postmortems" }, stages: ["used"], lastStageAt: {} as AssetStageSummary["lastStageAt"] },
+      { asset: { assetId: "skl-corr", assetType: "skill", name: "cloud-migration-postmortems" }, stages: ["opened", "corrected"], lastStageAt: {} as AssetStageSummary["lastStageAt"] },
+    ];
+    const { used } = effectiveUsedCandidates(summaries, diff);
+    expect(used.map((s) => s.asset.assetId)).toEqual(["skl-used"]);
   });
 });
 

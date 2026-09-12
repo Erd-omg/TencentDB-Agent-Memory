@@ -56,6 +56,8 @@ import { isExtractionAllowed, logExtractionSkipped } from "./extraction-gate.js"
 import { shouldAutoAppendReceipt, hasAssetEngagement } from "./evidence/task-completion.js";
 import { renderReceiptSummary } from "./evidence/receipt-summary.js";
 import { recordChatTurn } from "./evidence/turn-tracker.js";
+import { emitUsedEvents, extractCitationAnchors } from "./evidence/used-evidence.js";
+import { getAssetEventRepo } from "./db/assetEventRepo.js";
 import { runAutoValidation } from "./evidence/auto-validate.js";
 import { maybeRunAutoFinalize } from "./evidence/finalize.js";
 import {
@@ -1776,6 +1778,21 @@ export async function handleChatCompletions(
     pipe,
   );
 
+  // P0-1 补强：used answer 侧引用锚点 —— 模型答复点名了本会话 opened 的资产 → 补写 used。
+  if (!isAuxiliary) {
+    const si = (sessionInfo ?? {}) as Record<string, unknown>;
+    const pickId = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+    emitAnswerCitationUsed({
+      sessionKey,
+      sessionId: pickId(si.session_id) ?? sessionKey,
+      agentId: pickId(si.agent_id),
+      teamId: pickId(si.team_id) ?? spaceId,
+      userId: pickId(si.user_id) ?? keyId,
+      turnSeq: lf.turnSeq,
+      answerText: typeof assistantMessage?.content === "string" ? assistantMessage.content : "",
+    });
+  }
+
   // 内部使用埋点：非流式响应里的 tool_calls 逐个记 model_intent。
   try {
     const toolCalls = assistantMessage?.tool_calls;
@@ -1976,6 +1993,50 @@ export async function handleChatCompletions(
   return new Response(respText, { status: upstreamResp.status, headers: respHeaders });
 }
 
+
+/**
+ * used answer 侧引用锚点（P0-1 补强）：模型答复点名了本会话 opened 的资产 → 补写 used 事件。
+ *
+ * 与 finalize 的 diff 锚点互补：diff 锚点证明"改了代码且引用了资产"，answer 锚点证明
+ * "在答复里点名了读过的资产"。二者都是独立于"打开"动作的采纳信号（打开 ≠ 采纳）。
+ * 纯函数判定（extractCitationAnchors，无 LLM）；静默降级（DB 不可用直接返回）。
+ */
+export function emitAnswerCitationUsed(opts: {
+  sessionKey: string; sessionId?: string; agentId?: string; teamId?: string;
+  userId?: string; turnSeq?: number; answerText: string;
+}): void {
+  try {
+    if (!opts.answerText || opts.answerText.length < 8) return;
+    const repo = getAssetEventRepo();
+    if (!repo) return;
+    // 本会话已 opened、且尚未 used、未 corrected 的资产 = 候选。
+    const summaries = repo.distinctAssets(opts.sessionKey);
+    const candidates = summaries.filter(
+      (s) => s.stages.includes("opened") && !s.stages.includes("used") && !s.stages.includes("corrected"),
+    );
+    for (const s of candidates) {
+      const anchors = extractCitationAnchors(s.asset.name, opts.answerText, 1);
+      if (anchors.length === 0) continue;
+      emitUsedEvents(
+        {
+          sessionKey: opts.sessionKey,
+          sessionId: opts.sessionId,
+          agentId: opts.agentId,
+          teamId: opts.teamId,
+          userId: opts.userId,
+          turnSeq: opts.turnSeq,
+          bridge: "skill-bridge",
+          endpoint: "answer-citation",
+          httpStatus: 200, // 答复已成功返回，锚点基于成功响应文本
+          citation: { origin: "answer", anchors },
+        },
+        [s.asset],
+      );
+    }
+  } catch {
+    /* 证据补写失败绝不阻塞响应 */
+  }
+}
 
 function assistantContentForTdai(message: Record<string, unknown> | null): string | null {
   if (!message) return null;
@@ -2197,6 +2258,18 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       },
       pipe,
     );
+
+    // P0-1 补强：流式路径的 used answer 侧引用锚点（模型答复点名 opened 资产 → 补写 used）。
+    if (assistantContent) {
+      emitAnswerCitationUsed({
+        sessionKey,
+        sessionId: sessionKey,
+        teamId: spaceId,
+        userId: keyId,
+        turnSeq: lf.turnSeq,
+        answerText: assistantContent,
+      });
+    }
 
     // 内部使用埋点：每个 tool_use 意图一条 model_intent（fan-out）。
     // 详见 docs/design/2026-08-03-internal-usage-telemetry-plan.md §7.2 E。

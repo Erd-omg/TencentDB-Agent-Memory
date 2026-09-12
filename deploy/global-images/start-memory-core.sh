@@ -188,6 +188,10 @@ skill:
     searchTopK: 20
   extraction:
     enabled: true
+    # skill 抽取走 function-calling（enableTools=true），需显式指定支持 tools 的模型。
+    # 顶层 llm.model（默认 deepseek-v4-flash）在 tool-calling 场景可能返回 400 Bad Request，
+    # 故这里默认用 deepseek-v3.2；可用 MEMORY_SKILL_EXTRACTION_MODEL 覆盖。
+    model: "${MEMORY_SKILL_EXTRACTION_MODEL:-deepseek-v3.2}"
     maxIterations: 16
     queue:
       backend: local

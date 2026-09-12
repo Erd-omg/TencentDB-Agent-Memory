@@ -14,6 +14,7 @@
 export type AssetEventStage =
   | "recalled"
   | "selected"
+  | "opened"
   | "injected"
   | "used"
   | "validated"
@@ -62,6 +63,18 @@ export interface AssetEventEvidence {
     snippet?: string;       // 命中摘录（≤512B）
     httpStatus?: number;
   };
+  /**
+   * 引用锚点证据（赛题 F2，used 语义收紧）：
+   * 资产被"打开"（opened）后，模型在最终答复 / 代码变更中点名了该资产的
+   * 名称或关键 token —— 这是"读了并照做"的独立于「打开」动作的信号。
+   * 当 used 由「opened + 引用锚点」升级而来时，这里记录命中的锚点与出处。
+   */
+  citation?: {
+    /** 锚点出处："answer"（模型答复点名）| "diff"（最终代码变更中出现资产名/token）。 */
+    origin: "answer" | "diff";
+    /** 命中的锚点 token（资产名 / 关键 token 与出处文本的共现）。 */
+    anchors: string[];
+  };
   /** 测试结果证据（validated / corrected）。 */
   test_result?: {
     runner: string;         // "vitest" | "command" | ...
@@ -96,6 +109,24 @@ export interface AssetEventEvidence {
     trimmedByBudget: boolean;
     rank: number;
     threshold: number;
+  };
+  /**
+   * injected 事件的完整性哈希链（P1-1：独立核验"自报证据"的第一步）。
+   *
+   * 动机：injected 事件由 proxy 进程自己 repo.insert() 落库，无第二方独立核验。
+   * 哈希链让注入序列可审计、可重放校验：每条 injected 事件的 evidence.integrity 记录
+   *   ① 本事件关键字段（assetId + stage + sessionKey + turnSeq）的内容哈希；
+   *   ② 前一条 injected 事件的哈希（链指针 prev）。
+   * 读取侧（Panel / 审计脚本）可据此校验「链连续、无插入/删改」，把"自报"提升为
+   * "可验证的连续事实流"。完整独立核验（请求日志对账、session 重放）仍留后续（见文档）。
+   */
+  integrity?: {
+    /** 本事件的字段内容哈希（hex）。 */
+    hash: string;
+    /** 前一条 injected 事件的 hash（首条为 "genesis"）。 */
+    prev: string;
+    /** 参与哈希的字段清单（便于审计复算）。 */
+    fields: string[];
   };
   /**
    * finalize 写 validated 的 token 归因（启发式透明）。评审边界「token 归因是启发式、

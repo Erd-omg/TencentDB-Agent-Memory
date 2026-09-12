@@ -19,7 +19,10 @@
  *
  * 诚实边界（2026-09 边界硬化，防"大 diff / 多资产把 validated 摊到未实际使用的资产"）：
  *   - 归因是启发式（token 共现），不是因果证明；证据带 correlation 可审计，回执展示 token-overlap。
- *   - 只判本会话 used 资产（used 前置）；仅 selected / 已 corrected 一律跳过，防伪证。
+ *   - 只判本会话 used 资产（used 前置）；仅 selected / 仅 opened（无引用锚点）/ 已 corrected
+ *     一律跳过，防伪证（P0-1：打开 ≠ 采纳）。
+ *   - used 语义收紧（P0-1）：used 由「写操作」直接产生，或由「opened + diff 引用锚点」
+ *     在 finalize 阶段升级（见 effectiveUsedCandidates / 4b 补写 used 事件）。
  *   - 保守写判据：单候选 ≥1 命中；**多 used 候选**需「独有 token ∪ 变更文件路径 token」≥1，
  *     或 ≥2 个普通共享命中 —— 仅共享泛化词且无路径锚点 = 弱命中，不写 validated（CLI 报原因）。
  *   - 无变更（所选基准 diff 为空，含 HEAD 与 HEAD~1 兜底均空）→ 直接返回，不写任何 validated。
@@ -31,6 +34,7 @@ import { getCoreSkillClient } from "../skill/core-client.js";
 import { getAssetEventRepo, type AssetEventRepo } from "../db/assetEventRepo.js";
 import type { AssetEvent, AssetRef, AssetStageSummary } from "../db/asset-event.js";
 import type { ProxyConfig } from "../types.js";
+import { extractCitationAnchors } from "./used-evidence.js";
 
 /** 命令输出尾部保留上限。 */
 const OUTPUT_MAX_CHARS = 2000;
@@ -204,10 +208,46 @@ export function decideCorrelationWrite(
 }
 
 /**
- * token 相关度归因（纯函数）：对会话内 **已使用(used)** 资产，取 name/assetId 的 token
+ * 判定一条资产是否"实际 used"（P0-1 语义收紧后的前置）：
+ *   - 直接 used（写操作 / 已带引用锚点的 used 事件）→ true；
+ *   - 仅 opened（定向读取）→ 需在 diff 文本中出现引用锚点（资产名 token 共现），
+ *     证明模型在最终代码变更里"点名/采用了"该资产 —— 这才是"读了并照做"。
+ *   - corrected → false（被纠正的不参与归因）。
+ *
+ * 纯函数，不写事件；返回 used 资产列表 + opened 但无引用锚点、被排除的资产列表
+ * （供 weakRefusals 诚实披露"打开过但没引用，不判 validated"）。
+ */
+export function effectiveUsedCandidates(
+  summaries: AssetStageSummary[],
+  diffText: string,
+): { used: AssetStageSummary[]; openedUncited: AssetStageSummary[] } {
+  const used: AssetStageSummary[] = [];
+  const openedUncited: AssetStageSummary[] = [];
+  for (const s of summaries) {
+    if (s.stages.includes("corrected")) continue;
+    if (s.stages.includes("used")) {
+      used.push(s);
+      continue;
+    }
+    if (s.stages.includes("opened")) {
+      const anchors = extractCitationAnchors(s.asset.name, diffText, 1);
+      if (anchors.length > 0) {
+        // opened + diff 引用锚点 → 升级为 used（引用锚点 = 独立于"打开"的采纳信号）。
+        used.push(s);
+      } else {
+        openedUncited.push(s);
+      }
+    }
+  }
+  return { used, openedUncited };
+}
+
+/**
+ * token 相关度归因（纯函数）：对会话内 **实际使用(used)** 资产，取 name/assetId 的 token
  * 与 diff 文本的共现；共现数 ≥ minMatches 判"相关"。可经 extraText 补充资产描述/正文 token。
  *
- * 只认 used（定向读取/使用过），不认仅 selected —— 否则"被推荐但没打开"的资产也会被
+ * P0-1 收紧：归因候选 = `used` 或 `opened + diff 引用锚点`（见 effectiveUsedCandidates），
+ * 不认仅 selected / 仅 opened（无引用锚点）—— 否则"被打开但没采纳"的资产也会被
  * 写 validated，触发 F4「validated 无 used」链错误（过度归因）。已 corrected 的跳过。
  *
  * 返回语义 = 全命中 ≥ minMatches 的相关资产（并携带 path/distinctive/shared 桶，
@@ -221,8 +261,9 @@ export function correlateAssets(
   const { minMatches = 1, extraText } = opts;
   const diffTokens = new Set(tokenizeText(diffText));
   const pathTokens = pathTokensFromDiff(diffText);
-  // 归因候选 = 本会话 used 且未 corrected 的资产（仅它们可能被写 validated）。
-  const candidates = summaries.filter((s) => s.stages.includes("used") && !s.stages.includes("corrected"));
+  // 归因候选 = 本会话实际 used（含 opened+引用锚点升级）且未 corrected 的资产。
+  const { used: usedCandidates } = effectiveUsedCandidates(summaries, diffText);
+  const candidates = usedCandidates;
   // 共享集 = 出现在 ≥2 个候选 name token 集里的 token（多个 used 资产都有的词，
   // 单独出现时无法证明归给谁）。即使某候选零命中，它的名字也参与共享集（共享是"名里有"）。
   const tokenOwners = new Map<string, number>();
@@ -412,19 +453,25 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
   outcome.testOutput = testRes.output.trim();
   outcome.durationMs = Date.now() - t0;
 
-  // 4) token 相关度归因（只对 used/selected 资产）。
+  // 4) token 相关度归因（只对实际 used 资产，含 opened+diff 引用锚点升级）。
   const summaries = repoEvents ? repoEvents.distinctAssets(args.sessionKey) : [];
-  outcome.usedCandidateCount = summaries.filter(
-    (s) => s.stages.includes("used") && !s.stages.includes("corrected"),
-  ).length;
-  // 资产正文/摘要并入 token 集（非命名文本资产补强）：对 used&!corrected 候选逐个加载，
+  const diffForAttribution = [sel.diffStat, diffText].join("\n");
+  const { used: effectiveUsed, openedUncited } = effectiveUsedCandidates(summaries, diffForAttribution);
+  outcome.usedCandidateCount = effectiveUsed.length;
+  // 诚实披露：打开过但在最终变更中无引用锚点的资产，不升级为 used（不判 validated）。
+  for (const s of openedUncited) {
+    outcome.weakRefusals.push({
+      assetId: s.asset.assetId,
+      name: s.asset.name,
+      reason: "打开(opened)但最终代码变更中无引用锚点，未升级为 used（打开 ≠ 采纳）",
+    });
+  }
+  // 资产正文/摘要并入 token 集（非命名文本资产补强）：对实际 used 候选逐个加载，
   // 各自容错（Promise.allSettled）；取不到则跳过，静默退化为 name-only（= 原行为）。
   let extraText: Record<string, string> | undefined;
   if (args.config && loadAssetText) {
     const si = args.sessionInfo ?? {};
-    const candidateIds = summaries
-      .filter((s) => s.stages.includes("used") && !s.stages.includes("corrected"))
-      .map((s) => s.asset);
+    const candidateIds = effectiveUsed.map((s) => s.asset);
     const settled = await Promise.allSettled(candidateIds.map((a) => loadAssetText(a, { sessionInfo: si, config: args.config! })));
     const acc: Record<string, string> = {};
     settled.forEach((r, i) => {
@@ -432,11 +479,35 @@ export async function runTaskFinalize(args: TaskFinalizeArgs): Promise<TaskFinal
     });
     if (Object.keys(acc).length > 0) extraText = acc;
   }
-  outcome.correlated = correlateAssets(summaries, [sel.diffStat, diffText].join("\n"), {
+  outcome.correlated = correlateAssets(summaries, diffForAttribution, {
     minMatches: args.minMatches ?? 1,
     ...(extraText ? { extraText } : {}),
   });
   const minMatches = args.minMatches ?? 1;
+
+  // 4b) 对「opened → used 升级」的资产补写 used 事件（带引用锚点 citation），
+  //     使证据链闭合：validated 的前置必须是 used，而 used 现在有独立于"打开"的信号。
+  if (repoEvents) {
+    const siForUpgrade = args.sessionInfo ?? {};
+    for (const s of effectiveUsed) {
+      if (s.stages.includes("used")) continue; // 已是 used（写操作），无需补
+      const anchors = extractCitationAnchors(s.asset.name, diffForAttribution, 1);
+      if (anchors.length === 0) continue;
+      repoEvents.insert(repoEvents.newEvent({
+        stage: "used",
+        asset: s.asset,
+        sessionKey: args.sessionKey,
+        sessionId: pick(siForUpgrade.session_id),
+        taskId: pick(siForUpgrade.task_id),
+        agentId: pick(siForUpgrade.agent_id),
+        teamId: pick(siForUpgrade.team_id),
+        userId: pick(siForUpgrade.user_id),
+        evidence: {
+          citation: { origin: "diff", anchors },
+        },
+      }));
+    }
+  }
 
   // 5) 测试通过 → 相关资产套**保守写判据**写 validated（带 correlation/code_diff/outcome/test_result）。
   //    判"弱命中"的进 weakRefusals 不写 —— 防大 diff/多 used 资产把验证摊给未实际使用的资产。

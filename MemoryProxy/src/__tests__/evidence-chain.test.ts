@@ -36,11 +36,16 @@ describe("validateChain（F4）", () => {
     expect(issues).toEqual([]);
   });
 
-  it("used 缺 injected/selected → warning（可跨工具读取）", () => {
+  it("used 缺 injected/selected/opened → warning（可跨工具读取）", () => {
     const issues = validateChain(summary("skl-3", ["used"]));
     expect(issues).toHaveLength(1);
     expect(issues[0].level).toBe("warning");
-    expect(issues[0].missing).toBe("injected|selected");
+    expect(issues[0].missing).toBe("injected|selected|opened");
+  });
+
+  it("used 有 opened 前置（读后采纳）→ 无 warning（P0-1）", () => {
+    const issues = validateChain(summary("skl-7", ["opened", "used"]));
+    expect(issues).toEqual([]);
   });
 
   it("corrected 不要求 used —— 用户主动纠正合法", () => {

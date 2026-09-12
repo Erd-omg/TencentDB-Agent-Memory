@@ -84,6 +84,11 @@ describe("EvidenceTracingObserver", () => {
     expect(events[0].taskId).toBe("task-demo");
     expect(events[0].turnSeq).toBe(1);
     expect(events[0].evidence?.decision).toContain("skill-injector");
+
+    // P1-1：injected 事件带完整性哈希链（首条 genesis，后续 prev=前一条 hash）。
+    expect(events[0].evidence?.integrity?.prev).toBe("genesis");
+    expect(events[0].evidence?.integrity?.hash).toHaveLength(64);
+    expect(events[1].evidence?.integrity?.prev).toBe(events[0].evidence?.integrity?.hash);
   });
 
   it("无 assets 标记的块 → 不落事件", () => {

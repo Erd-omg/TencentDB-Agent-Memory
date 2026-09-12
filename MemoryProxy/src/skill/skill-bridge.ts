@@ -36,6 +36,7 @@ import { emitBridgeToolCallTelemetry, emitBridgeRejectTelemetry, agentSourceFrom
 import {
   emitRecalledEvents,
   emitSelectedEvents,
+  emitOpenedEvents,
   emitUsedEvents,
   skillAssetsFromResponse,
 } from "../evidence/used-evidence.js";
@@ -208,23 +209,30 @@ export function writeOpEvidence(
 }
 
 /**
- * 模型实际"使用"了资产的成功端点（任务三 used 证据）：**读取内容**（get / files/read）
- * 或**修改资产**（update / patch / files/write / files/remove）。
+ * 模型"写"资产的成功端点（used 证据的强信号）：模型主动修改资产 = 明确的采纳动作，
+ * 独立于"打开/阅读"。写操作落 used，附 code_diff + outcome。
  *
- * 赛题 F2：`search` **不在**此集合中 —— search 只是召回候选（记 recalled 事件），
- * 模型看到命中列表 ≠ 把资产内容用于决策。只有定向读取 / 修改才算"使用"。
+ * P0-1（used 语义收紧）：读操作（get / get-by-name / files/read）已从 used 拆出，
+ * 改为落 opened（见 SUBPATH_OPENS_ASSET）——「打开阅读」≠「采纳」。
  */
 const SUBPATH_USES_ASSET = new Set<string>([
-  "get",
-  "get-by-name",
-  "files/read",
   "update",
   "patch",
   "files/write",
   "files/remove",
 ]);
 
-/** 定向读取 → selected（选中展开内容）；其余走 used。 */
+/**
+ * 定向读取 → opened（P0-1：打开内容进上下文，但不宣称"采纳"）。
+ * 模型后续在答复/代码变更中点名该资产（引用锚点）才会升级为 used（finalize 阶段）。
+ */
+const SUBPATH_OPENS_ASSET = new Set<string>([
+  "get",
+  "get-by-name",
+  "files/read",
+]);
+
+/** 定向读取 → selected（选中展开内容，recalled 与 opened 之间的桥梁）。 */
 const SUBPATH_SELECTS_ASSET = new Set<string>([
   "get",
   "get-by-name",
@@ -727,9 +735,9 @@ export function createSkillBridgeHandler(
         ? Buffer.from(content, "base64")
         : Buffer.from(content, "utf-8");
 
-      // 证据打点（P1-2）：files/download 读取 skill 文件内容 = 定向读取 →
-      // selected + used（对齐 get-by-name/files/read；响应是原始字节无 skill_id，
-      // 用 inbound skill_id 补）。与主路径 :1001 同一套证据源。
+      // 证据打点（P0-1）：files/download 读取 skill 文件内容 = 定向读取 →
+      // selected + opened（对齐 get-by-name/files/read；打开 ≠ 采纳，不落 used）。
+      // 响应是原始字节无 skill_id，用 inbound skill_id 补。与主路径同一套证据源。
       const dlSkillId = typeof inboundBody.skill_id === "string" ? inboundBody.skill_id : undefined;
       if (dlSkillId) {
         const dlSource = {
@@ -745,7 +753,7 @@ export function createSkillBridgeHandler(
         };
         const dlAssets = [{ assetId: dlSkillId, assetType: "skill" as const }];
         emitSelectedEvents(dlSource, dlAssets);
-        emitUsedEvents(dlSource, dlAssets);
+        emitOpenedEvents(dlSource, dlAssets);
       }
 
       return new Response(rawBytes, {
@@ -1051,8 +1059,10 @@ export function createSkillBridgeHandler(
     // ── 证据打点（任务三，赛题 F1/F2）：成功响应后，按 sub 分派阶段事件 ──
     // 独立于 LLM 自述：模型真的调了 bridge 且拿到了资产，才记录。
     //   - search          → recalled（只召回候选，不宣称使用）
-    //   - get/get-by-name/files/read → selected（定向展开内容）+ used
-    //   - update/patch/files/write/files/remove → used（修改资产）
+    //   - get/get-by-name/files/read → selected + opened（定向展开内容；打开 ≠ 采纳）
+    //   - update/patch/files/write/files/remove → used（修改资产，强采纳信号）
+    // P0-1：读操作不再落 used，改为 opened；used 只由写操作直接产生，
+    //   或由 opened 资产在 finalize 阶段经「引用锚点」升级（见 evidence/finalize.ts）。
     // 注意：sessionKey 用原始 x-conversation-id（与 injected 事件/回执对齐），
     // 不要用带 agentSource 前缀的 emitKey（composite_key 是给 tool_call_logs 对齐用的）。
     if (resp.status >= 200 && resp.status < 300) {
@@ -1076,6 +1086,10 @@ export function createSkillBridgeHandler(
         emitRecalledEvents(baseSource, parsedAssets);
       } else if (SUBPATH_SELECTS_ASSET.has(sub)) {
         emitSelectedEvents(baseSource, parsedAssets);
+      }
+      if (SUBPATH_OPENS_ASSET.has(sub)) {
+        // 定向读取 → opened（打开内容，不宣称采纳）。
+        emitOpenedEvents(baseSource, parsedAssets);
       }
       if (SUBPATH_USES_ASSET.has(sub)) {
         // 写操作：附 code_diff（请求里的真实 old→new / 写入文件）与 outcome（applied+http）。
