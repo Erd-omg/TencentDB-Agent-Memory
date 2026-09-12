@@ -26,11 +26,21 @@
  *   - MemoryPanel :8123（PANEL_URL）
  *   - 复用 asset-import.ts 的 loadConfigFromEnv（PANEL_URL / TDAI_SERVICE_ID / TDAI_USER_KEY）
  *
- * 诚实边界（如实写进报告）：
+ * 诚实边界（如实写进报告，P2-1 强化）：
  *   - skill/extract 的 LLM 抽取是异步的，wait 轮询有上限；召回计数是「抽取完成且语义命中」
  *     的上界，不宣称精确 recall，只给「recall 上限 + 未覆盖清单」。
  *   - expected_assets 是人工标注的自然语言短语，实际落库资产是结构化 skill/chat_memory，
  *     二者语义核对用「关键词交集」近似，属启发式而非精确匹配。
+ *   - ⚠️ **ground truth 来源与同义反复风险（P2-1）**：
+ *       ① `expected_assets`（manifest.json，26 条）由**作者本人**撰写，与 demo-corpus 的
+ *          session 文本同源（同一个人写的内容），且标注时作者已看过抽取管线与语料——
+ *          **未做盲标、无外部标注**；
+ *       ② 「命中」是关键词子串匹配：从 expected_assets 抽 token，与落库的 skill/chat_memory
+ *          名称/描述做子串交集。它证明的是「抽取管线能把作者写的英语/中文短语重新找出来」，
+ *          **不是真实召回率**——这是一个「自出题、自答题、自判卷」的闭环；
+ *       ③ 因此 `recall_upper_bound`（如 0.944）应读作「在自造同源语料上的管线自洽性验证」，
+ *          **不可外推为真实历史 session 的召回率**。真实召回率需在作者未见过的、独立标注的
+ *          session 上盲标后才可宣称（见 docs/design-156.md §6.2 修正说明）。
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
@@ -267,6 +277,7 @@ function reconcile(manifest, skills, assets) {
     expected_total: expected.length,
     hit: hit.length,
     miss: miss.length,
+    // ⚠️ P2-1：此字段名为「管线自洽率」而非「召回率」更准确 —— 见下方 self_consistency_note。
     recall_upper_bound: Number(recall.toFixed(3)),
     miss_list: miss,
     hit_list: hit,
@@ -279,6 +290,10 @@ function reconcile(manifest, skills, assets) {
     skill_expectation_count: expected.filter((e) => /skill/i.test(e.asset)).length,
     memory_expectation_count: expected.filter((e) => !/skill/i.test(e.asset)).length,
     known_limitation: "skill/extract 为异步抽取，导入后需等待 core skill-conv-worker 消费才落库；查询时点若早于抽取完成，skill 计数偏少。",
+    // P2-1：ground truth 来源与同义反复风险的完整声明。
+    self_consistency_note: "recall_upper_bound 是在作者自造、同源、未盲标的语料（demo-corpus）上的关键词子串命中率，"
+      + "证明的是「抽取管线能找回作者自己写的短语」，非真实历史 session 召回率；ground truth 由作者本人撰写且标注时已看过抽取结果，"
+      + "未做盲标、无外部标注。真实召回率需在独立标注的、作者未见过的 session 上盲标后评估。",
   };
 }
 
@@ -324,14 +339,15 @@ async function main() {
 
   console.log("");
   console.log("=".repeat(60));
-  console.log("  核对结果（recall 上限）");
+  console.log("  核对结果（管线自洽率，非真实召回率）");
   console.log("=".repeat(60));
   console.log(`  预期基线（expected_assets）: ${result.expected_total}`);
   console.log(`    ├ skill 类预期: ${result.skill_expectation_count}  memory 类预期: ${result.memory_expectation_count}`);
   console.log(`  实际落库 skill: ${result.actual_skill_count}  asset(chat_memory): ${result.actual_asset_count}`);
   console.log(`  语义命中: ${result.hit}  未覆盖: ${result.miss}`);
-  console.log(`  recall 上限: ${(result.recall_upper_bound * 100).toFixed(1)}%`);
+  console.log(`  管线自洽率（recall_upper_bound）: ${(result.recall_upper_bound * 100).toFixed(1)}%`);
   console.log(`  ⚠️  ${result.known_limitation}`);
+  console.log(`  ⚠️  ${result.self_consistency_note}`);
   if (result.miss_list.length) {
     console.log("  ── 未覆盖清单 ──");
     for (const m of result.miss_list) console.log(`    [${m.session_id}] ${m.asset}`);

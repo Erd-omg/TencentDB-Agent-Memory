@@ -3,15 +3,36 @@
  * task5-compare.mjs — 任务五「资产效果评测与反事实比较」单侧跑分脚本。
  *
  * 对照①（主对照）：用 vs 不用团队资产。
- *   本脚本每次只跑「一侧」：--mode on（injection.enabled=true）或 --mode off（false）。
+ *   本脚本每次只跑「一侧」：--mode on / off / meta。
  *   开关切换 + proxy 重启由调用方负责（见 scripts/task5-compare/README.md），
  *   脚本只记录本轮 configHash / injection 状态进结果，保证两侧进程隔离、可追溯。
+ *
+ * ── ✅ 三组对齐设计（P1-2 修正，2026-09-12）──
+ * 原设计只有 on/off 两组，off 组连「团队资产存在」都不知道，混淆了「用了资产」与
+ * 「被告知有资产」。现补齐第三组，使变量可控：
+ *   | 组别 | 被告知资产存在 | 自动注入内容 | 可主动检索 |
+ *   | off  | ✗              | ✗            | ✗          |
+ *   | meta | ✓（prompt 元信息）| ✗          | ✓（skill_search 代劳）|
+ *   | on   | ✓              | ✓            | ✓          |
+ *   - **off vs meta** 隔离「被告知存在 + 可检索」的增益；
+ *   - **meta vs on** 隔离「自动注入内容」的增益（这是本对照的核心变量）。
+ *   meta 组通过 prompt 前缀告知模型「团队资产库有相关历史经验，可 skill_search 检索」，
+ *   并让脚本代劳执行 skill_search（不自动注入内容）。
+ *
+ * ── ⚠️ 仍存的偏差（诚实声明）──
+ * 1. **used 判定已部分缓解**：P0-1 已把读操作从 used 降级为 opened，used 需引用锚点升级；
+ *    但本脚本仍靠 skill_view 代劳打开 skill，命中口径仍偏向「打开了预埋答案的 skill」。
+ * 2. **判定依赖 ground truth**：判定「检索方向对」用的是 BUGS[].groundTruth（作者
+ *    预知答案），非盲评。
+ *
+ * 结论强度：补齐三组后，**meta vs on** 的差异才可归因于「资产内容本身」；
+ * 仅 on vs off 仍只证明「被告知存在 + 注入」的合并增益。修正说明见 docs/design-156.md §7.3。
  *
  * 每侧流程（对 3 个独立 bug 位点各一轮修复会话）：
  *   1. 复位夹具到 bug 态 → 红测（node --test tests/<testFile>，预期非 0）
  *   2. 新会话（headerAutoSelect）+ 修复 prompt → agentic 循环：
  *      a. 模型输出 → 解析其 skill_view / skill_search 工具调用**意图**
- *      b. 脚本代劳调 skill-bridge get-by-name 加载 skill（proxy 自动记 used/selected 证据）
+ *      b. 脚本代劳调 skill-bridge get-by-name 加载 skill（proxy 自动记 opened/selected 证据）
  *      c. 把 skill 内容回填给模型，循环直到模型输出最终修复文本（无工具意图）
  *      （off 模式无注入 → 模型无 skill 工具 → 直接文本作答）
  *   3. 判定「是否给出正确修复」：关键词硬检查（确定性、零成本）→ 未命中时 LLM 软判断兜底
@@ -46,8 +67,8 @@ function arg(name, fallback) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 const MODE = arg("--mode", "");
-if (MODE !== "on" && MODE !== "off") {
-  console.error("用法：node scripts/task5-compare.mjs --mode on|off [--round N]");
+if (MODE !== "on" && MODE !== "off" && MODE !== "meta") {
+  console.error("用法：node scripts/task5-compare.mjs --mode on|off|meta [--round N]");
   process.exit(2);
 }
 const ROUND = Number(arg("--round", "1"));
@@ -199,7 +220,7 @@ function parseIntent(content) {
   return intents;
 }
 
-/** 脚本代劳调 bridge get-by-name（proxy 记 used/selected 证据）。 */
+/** 脚本代劳调 bridge get-by-name（proxy 记 opened/selected 证据；used 需后续引用锚点升级）。 */
 async function bridgeGetByName(sessionKey, skillName) {
   const resp = await fetch(`${PROXY}/skill-bridge/v3/skill/get-by-name`, {
     method: "POST",
@@ -214,9 +235,33 @@ async function bridgeGetByName(sessionKey, skillName) {
   return { status: resp.status, text };
 }
 
+/** 脚本代劳调 bridge search（meta 组「可主动检索但不自动注入」用）。 */
+async function bridgeSearch(sessionKey, query) {
+  const resp = await fetch(`${PROXY}/skill-bridge/v3/skill/search`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tdai-service-id": "default",
+      "x-conversation-id": sessionKey,
+    },
+    body: JSON.stringify({ query, top_k: 5 }),
+  });
+  const text = await resp.text();
+  return { status: resp.status, text };
+}
+
+/**
+ * meta 组 prompt 前缀（P1-2 三组对齐）：告知「团队资产存在且可检索」，但不注入内容。
+ * 使 meta 与 on 的唯一差异 = 「是否自动注入资产内容」。
+ */
+const META_PREFIX = "[元信息] 本团队维护了共享资产库（历史失败经验/代码知识/协作约定）。"
+  + "如果你认为任务的修复方向可能依赖团队经验，可用 skill_search 工具检索后再作答。\n\n";
+
 /** agentic 循环：发 prompt → 解析工具意图 → 代劳加载 → 回填 → 循环直到最终答复。 */
 async function agenticChat(sessionKey, prompt) {
-  const messages = [{ role: "user", content: prompt }];
+  // meta 组：注入「团队资产存在」元信息前缀（不注入内容），隔离「内容注入」变量。
+  const effectivePrompt = MODE === "meta" ? META_PREFIX + prompt : prompt;
+  const messages = [{ role: "user", content: effectivePrompt }];
   let totalTokens = 0;
   let finalText = "";
   let toolCalls = 0;
@@ -250,7 +295,13 @@ async function agenticChat(sessionKey, prompt) {
         loadedSkills.push(it.skill);
         toolCalls++;
       } else if (it.type === "search") {
-        results += `[skill_search] query="${it.query}"（评测脚本未实现团队检索代劳，已跳过）\n\n`;
+        // meta/on 组实现真实检索代劳（P1-2）：off 组无此能力（不告知存在）。
+        if (MODE === "on" || MODE === "meta") {
+          const sr = await bridgeSearch(sessionKey, it.query);
+          results += `[skill_search] query="${it.query}" → HTTP ${sr.status}\n${sr.text.slice(0, 3000)}\n\n`;
+        } else {
+          results += `[skill_search] query="${it.query}"（off 组不告知资产存在，已跳过）\n\n`;
+        }
         toolCalls++;
       }
     }
@@ -394,9 +445,9 @@ for (const bug of BUGS) {
   console.log(`      [4] 施加 fixed 后测试(${bug.testFile}) exit=${green.code}（预期 0，判题器自验）`);
   assert(green.code === 0, `${bug.id} fixed 态 node --test 应全绿（实际 exit=${green.code}）`);
 
-  // 5. mem:finalize → validated + contributed（仅 on 侧有 used 资产可归因）
+  // 5. mem:finalize → validated + contributed（on/meta 侧可能有 used 资产可归因）
   let finalizeText = "";
-  if (MODE === "on") {
+  if (MODE === "on" || MODE === "meta") {
     finalizeText = await sendFinalize(sessionKey, bug.testFile);
     writeFileSync(join(OUT_DIR, `${bug.id}-finalize.txt`), finalizeText, "utf8");
     console.log(`      [5] mem:finalize → ${finalizeText.split("\n").slice(0, 6).join(" ").slice(0, 200)}`);
